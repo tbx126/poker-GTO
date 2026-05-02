@@ -1,0 +1,47 @@
+:root {
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  color-scheme: dark;
+  background: #0e1015;
+  color: #e6e8eb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: #1c2230;
+  border: 1px solid #2c3548;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+button:hover {
+  background: #232b3d;
+  border-color: #3a4663;
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: #2563eb;
+  border-color: #3b82f6;
+}
+
+button.primary:hover {
+  background: #1d4ed8;
+}

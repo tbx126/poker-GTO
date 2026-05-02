@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/lockcontrols.tsx","./src/panelheader.tsx","./src/rangeheatmap.tsx","./src/scenarioconfig.tsx","./src/solverconsole.tsx","./src/strategydetail.tsx","./src/actions.ts","./src/api.ts","./src/hands.ts","./src/main.tsx","./src/mockdata.ts","./src/preflopadapter.ts"],"version":"5.9.3"}

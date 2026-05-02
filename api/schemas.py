@@ -7,7 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-GameName = Literal["kuhn", "leduc"]
+GameName = Literal["kuhn", "leduc", "postflop"]
 PanelSide = Literal["SB", "BB"]
 
 
@@ -96,3 +96,65 @@ class PreflopResponse(BaseModel):
     final_exploitability: float
     elapsed_ms: int
     panels: list[PreflopPanel]                  # [OOP_BB_defense, IP_SB_open]
+
+
+# ----- Deep CFR postflop -----
+
+
+class DeepCFRConfig(BaseModel):
+    """Configuration for Deep CFR solver."""
+    
+    backbone_type: str = Field(default="mlp", description="Network backbone: 'mlp' or 'transformer'")
+    num_iters: int = Field(default=100, ge=1, le=10000, description="Training iterations")
+    num_traversals: int = Field(default=50, ge=1, le=1000, description="Tree traversals per iteration")
+    learning_rate: float = Field(default=1e-3, gt=0, le=1.0)
+
+
+class PostflopConfig(BaseModel):
+    """Configuration for postflop game."""
+    
+    stack: int = Field(default=100, ge=10, le=1000, description="Stack size in big blinds")
+    pot: int = Field(default=10, ge=1, le=100, description="Pot size in big blinds")
+    bet_sizings: list[float] = Field(
+        default=[0.5, 0.75, 1.0],
+        description="Bet sizings as fraction of pot"
+    )
+
+
+class DeepCFRRequest(BaseModel):
+    """Request for Deep CFR postflop solve."""
+    
+    game_config: PostflopConfig = Field(default_factory=PostflopConfig)
+    solver_config: DeepCFRConfig = Field(default_factory=DeepCFRConfig)
+    board: list[str] | None = Field(
+        default=None,
+        description="Optional fixed board cards (e.g., ['Ah', 'Kd', '7c']). Random if not specified."
+    )
+
+
+class PostflopAction(BaseModel):
+    """Action representation for postflop."""
+    
+    kind: str          # CHECK, FOLD, CALL, BET, RAISE
+    amount: int | None = None
+    label: str         # Human-readable label
+
+
+class PostflopStrategy(BaseModel):
+    """Strategy for a postflop infoset."""
+    
+    infoset: str
+    actions: list[PostflopAction]
+    probs: list[float]
+    ev: float | None = None
+
+
+class DeepCFRResponse(BaseModel):
+    """Response from Deep CFR postflop solve."""
+    
+    iters: int
+    elapsed_ms: int
+    exploitability: float | None = None
+    board: list[str]
+    strategies: list[PostflopStrategy]
+    training_losses: dict[str, list[float]]

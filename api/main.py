@@ -9,13 +9,15 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.schemas import (
+    DeepCFRRequest,
+    DeepCFRResponse,
     GameName,
     PreflopRequest,
     PreflopResponse,
     SolveRequest,
     SolveResponse,
 )
-from api.service import solve, solve_preflop
+from api.service import solve, solve_postflop, solve_preflop
 
 app = FastAPI(
     title="Poker GTO Solver",
@@ -50,3 +52,12 @@ def solve_preflop_endpoint(req: PreflopRequest) -> PreflopResponse:
 @app.post("/solve/{game}", response_model=SolveResponse)
 def solve_endpoint(game: GameName, req: SolveRequest) -> SolveResponse:
     return solve(game, req)
+
+
+@app.post("/solve/postflop", response_model=DeepCFRResponse)
+def solve_postflop_endpoint(req: DeepCFRRequest) -> DeepCFRResponse:
+    """Solve postflop using Deep CFR with neural networks."""
+    try:
+        return solve_postflop(req)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e

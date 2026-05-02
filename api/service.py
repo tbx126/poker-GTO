@@ -227,3 +227,125 @@ def solve_preflop(req: PreflopRequest) -> PreflopResponse:
         elapsed_ms=int((time.perf_counter() - started) * 1000),
         panels=panels,
     )
+
+
+# ----- Deep CFR postflop -----
+
+
+def _parse_card(card_str: str):
+    """Parse card string like 'Ah' to Card object."""
+    from engine.cards import card_from_str
+    return card_from_str(card_str)
+
+
+def _action_to_postflop(action, game_state) -> dict:
+    """Convert Action to PostflopAction dict."""
+    from engine.actions import ActionKind
+    
+    kind_map = {
+        ActionKind.FOLD: "FOLD",
+        ActionKind.CHECK: "CHECK",
+        ActionKind.CALL: "CALL",
+        ActionKind.BET: "BET",
+        ActionKind.RAISE: "RAISE",
+    }
+    
+    kind = kind_map.get(action.kind, "UNKNOWN")
+    amount = action.amount
+    
+    # Generate label
+    if action.kind == ActionKind.FOLD:
+        label = "Fold"
+    elif action.kind == ActionKind.CHECK:
+        label = "Check"
+    elif action.kind == ActionKind.CALL:
+        label = f"Call {amount}" if amount else "Call"
+    elif action.kind == ActionKind.BET:
+        label = f"Bet {amount}" if amount else "Bet"
+    elif action.kind == ActionKind.RAISE:
+        label = f"Raise {amount}" if amount else "Raise"
+    else:
+        label = kind
+    
+    return {
+        "kind": kind,
+        "amount": amount,
+        "label": label,
+    }
+
+
+def solve_postflop(req: 'DeepCFRRequest') -> 'DeepCFRResponse':
+    """Solve postflop using Deep CFR."""
+    from api.schemas import (
+        DeepCFRResponse,
+        PostflopAction,
+        PostflopStrategy,
+    )
+    from solver.deep_cfr.solver import DeepCFRSolver, DeepCFRConfig
+    from solver.games.holdem import PostflopGame, BettingConfig, PostflopGameWithBoard
+    
+    started = time.perf_counter()
+    
+    # Create game config
+    game_config = BettingConfig(
+        stack=req.game_config.stack,
+        pot=req.game_config.pot,
+        bet_sizings=tuple(req.game_config.bet_sizings),
+    )
+    
+    # Create game (with fixed board if specified)
+    if req.board:
+        board = tuple(_parse_card(c) for c in req.board)
+        game = PostflopGameWithBoard(board, game_config)
+    else:
+        game = PostflopGame(game_config)
+    
+    # Create solver config
+    solver_config = DeepCFRConfig(
+        backbone_type=req.solver_config.backbone_type,
+        num_iters=req.solver_config.num_iters,
+        num_traversals=req.solver_config.num_traversals,
+        learning_rate=req.solver_config.learning_rate,
+    )
+    
+    # Train solver
+    solver = DeepCFRSolver(game, solver_config)
+    solver.train()
+    
+    # Collect strategies from visited states
+    strategies = []
+    board_str = [str(c) for c in (req.board or [])]
+    
+    # Sample some states to get strategies
+    for _ in range(10):
+        state = game.initial_state()
+        if req.board:
+            board_str = [str(c) for c in state.full_board[:5]]
+        
+        # Get strategy for initial state
+        strategy = solver.get_strategy(state)
+        actions = game.legal_actions(state)
+        
+        action_list = [_action_to_postflop(a, state) for a in actions]
+        probs = [strategy.get(i, 0.0) for i in range(len(actions))]
+        
+        strategies.append(PostflopStrategy(
+            infoset=game.infoset_key(state, 0),
+            actions=[PostflopAction(**a) for a in action_list],
+            probs=probs,
+        ))
+    
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    
+    return DeepCFRResponse(
+        iters=solver.iter,
+        elapsed_ms=elapsed_ms,
+        exploitability=solver.exploitability() if hasattr(solver, 'exploitability') else None,
+        board=board_str,
+        strategies=strategies[:10],  # Limit to 10 strategies
+        training_losses={
+            "player_0": solver.advantage_losses.get(0, []),
+            "player_1": solver.advantage_losses.get(1, []),
+            "strategy": solver.strategy_losses,
+        },
+    )

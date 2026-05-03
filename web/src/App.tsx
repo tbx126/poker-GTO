@@ -1,220 +1,378 @@
-import { useState } from "react";
-import { ACTIONS } from "./actions";
-import type { HandStrategy } from "./actions";
-import type { PreflopLock, TreeConfig } from "./api";
-import { DEFAULT_TREE, solvePreflop } from "./api";
-import { PanelHeader } from "./PanelHeader";
+import { useState, useEffect, useCallback } from "react";
+import { ACTIONS, type ActionKey, type HandStrategy } from "./actions";
+import type { PreflopScenarioRequest, PreflopStrategyResponse } from "./api";
+import { getPreflopStrategyMatrix } from "./api";
 import { RangeHeatmap } from "./RangeHeatmap";
-import { StrategyDetail } from "./StrategyDetail";
-import { SolverConsole } from "./SolverConsole";
-import { ScenarioConfig } from "./ScenarioConfig";
-import { SCENARIO_BTN_VS_BB } from "./mockData";
-import type { ScenarioStrategy } from "./mockData";
-import { responseToScenarios } from "./preflopAdapter";
 import "./App.css";
 
-interface Selection {
-  hand: string;
-  strategy: HandStrategy;
-}
+// Positions for 6-max
+const POSITIONS = ["UTG", "HJ", "CO", "BTN", "SB", "BB"] as const;
+type Position = typeof POSITIONS[number];
 
-interface Scenario {
-  oop: ScenarioStrategy;
-  ip: ScenarioStrategy;
-  source: "mock" | "live";
-  meta?: { iters: number; exploitability: number; elapsed_ms: number };
-}
+// Scenario types
+type ScenarioType = "open" | "face_open" | "face_3bet" | "face_4bet";
 
-type SideLocks = Record<string, number[]>;
-
-const INITIAL_SCENARIO: Scenario = {
-  oop: SCENARIO_BTN_VS_BB.oop,
-  ip: SCENARIO_BTN_VS_BB.ip,
-  source: "mock",
-};
-
-const DEFAULT_PREFLOP_ITERS = 80;
-
-function buildLockPayload(scenario: Scenario, locks: { oop: SideLocks; ip: SideLocks }): PreflopLock[] {
-  const out: PreflopLock[] = [];
-  if (scenario.oop.meta) {
-    for (const [hand, probs] of Object.entries(locks.oop)) {
-      out.push({ history: scenario.oop.meta.history, hand, probs });
-    }
-  }
-  if (scenario.ip.meta) {
-    for (const [hand, probs] of Object.entries(locks.ip)) {
-      out.push({ history: scenario.ip.meta.history, hand, probs });
-    }
-  }
-  return out;
+interface ActionRecord {
+  position: Position;
+  action: string;
+  size?: number;
 }
 
 export function App() {
-  const [oopSel, setOopSel] = useState<Selection | null>(null);
-  const [ipSel, setIpSel] = useState<Selection | null>(null);
-  const [consoleOpen, setConsoleOpen] = useState(false);
-  const [scenario, setScenario] = useState<Scenario>(INITIAL_SCENARIO);
-  const [solving, setSolving] = useState(false);
-  const [solveErr, setSolveErr] = useState<string | null>(null);
-  const [locks, setLocks] = useState<{ oop: SideLocks; ip: SideLocks }>({ oop: {}, ip: {} });
-  const [cfg, setCfg] = useState<TreeConfig>(DEFAULT_TREE);
-  const [cfgOpen, setCfgOpen] = useState(false);
+  // Scenario state
+  const [heroPosition, setHeroPosition] = useState<Position>("BTN");
+  const [scenarioType, setScenarioType] = useState<ScenarioType>("open");
+  const [effectiveStack, setEffectiveStack] = useState(100);
+  const [tableSize, setTableSize] = useState(6);
 
-  async function runPreflopSolve() {
-    setSolving(true);
-    setSolveErr(null);
+  // Action history
+  const [actionHistory, setActionHistory] = useState<ActionRecord[]>([]);
+  const [raiserPosition, setRaiserPosition] = useState<Position | null>(null);
+  const [threeBettor, setThreeBettor] = useState<Position | null>(null);
+
+  // Strategy data
+  const [strategyData, setStrategyData] = useState<PreflopStrategyResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Selected hand for detail view
+  const [selectedHand, setSelectedHand] = useState<string | null>(null);
+
+  // Fetch strategy matrix when scenario changes
+  const fetchStrategy = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+
     try {
-      const r = await solvePreflop(DEFAULT_PREFLOP_ITERS, buildLockPayload(scenario, locks), cfg);
-      const next = responseToScenarios(r);
-      setScenario({
-        oop: next.oop,
-        ip: next.ip,
-        source: "live",
-        meta: {
-          iters: r.iters,
-          exploitability: r.final_exploitability,
-          elapsed_ms: r.elapsed_ms,
-        },
-      });
-      setOopSel(null);
-      setIpSel(null);
+      const req: PreflopScenarioRequest = {
+        table_size: tableSize,
+        effective_stack: effectiveStack,
+        hero_position: heroPosition,
+        scenario_type: scenarioType,
+      };
+
+      if (scenarioType === "face_open" && raiserPosition) {
+        req.raiser_position = raiserPosition;
+        req.raise_size = 2.5;
+      }
+
+      if (scenarioType === "face_3bet" && raiserPosition && threeBettor) {
+        req.raiser_position = raiserPosition;
+        req.raise_size = 2.5;
+        req.three_bettor = threeBettor;
+        req.three_bet_size = 9.0;
+      }
+
+      const data = await getPreflopStrategyMatrix(req);
+      setStrategyData(data);
     } catch (e) {
-      setSolveErr(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSolving(false);
+      setLoading(false);
     }
-  }
+  }, [tableSize, effectiveStack, heroPosition, scenarioType, raiserPosition, threeBettor]);
 
-  function resetToMock() {
-    setScenario(INITIAL_SCENARIO);
-    setOopSel(null);
-    setIpSel(null);
-    setLocks({ oop: {}, ip: {} });
-  }
+  useEffect(() => {
+    fetchStrategy();
+  }, [fetchStrategy]);
 
-  function setLock(side: "oop" | "ip", hand: string, probs: number[]) {
-    setLocks((prev) => ({ ...prev, [side]: { ...prev[side], [hand]: probs } }));
-  }
+  // Reset action history when scenario changes
+  useEffect(() => {
+    setActionHistory([]);
+    setRaiserPosition(null);
+    setThreeBettor(null);
+  }, [scenarioType, heroPosition]);
 
-  function clearLock(side: "oop" | "ip", hand: string) {
-    setLocks((prev) => {
-      const sideLocks = { ...prev[side] };
-      delete sideLocks[hand];
-      return { ...prev, [side]: sideLocks };
-    });
-  }
+  // Get strategy for heatmap
+  const getHeatmapStrategy = (): Record<string, HandStrategy> => {
+    if (!strategyData) return {};
+    return strategyData.strategies;
+  };
 
-  function clearAllLocks() {
-    setLocks({ oop: {}, ip: {} });
-  }
+  // Get selected hand strategy
+  const getSelectedHandStrategy = (): HandStrategy | null => {
+    if (!selectedHand || !strategyData) return null;
+    return strategyData.strategies[selectedHand] || null;
+  };
 
-  const { oop, ip } = scenario;
-  const totalLocks = Object.keys(locks.oop).length + Object.keys(locks.ip).length;
-  const oopLockSet = new Set(Object.keys(locks.oop));
-  const ipLockSet = new Set(Object.keys(locks.ip));
+  // Get scenario description
+  const getScenarioDescription = (): string => {
+    if (!strategyData) return "";
+    return strategyData.scenario_description;
+  };
+
+  // Render action history
+  const renderActionHistory = () => {
+    if (actionHistory.length === 0) {
+      return <div className="history-empty">无操作记录</div>;
+    }
+
+    return actionHistory.map((record, i) => (
+      <div key={i} className="history-item">
+        <span className="history-position">{record.position}</span>
+        <span className="history-action">{record.action}</span>
+        {record.size && <span className="history-size">{record.size}bb</span>}
+      </div>
+    ));
+  };
+
+  // Render scenario controls
+  const renderScenarioControls = () => {
+    return (
+      <div className="scenario-controls">
+        {/* Hero Position */}
+        <div className="control-group">
+          <label>你的位置</label>
+          <div className="position-buttons">
+            {POSITIONS.map((pos) => (
+              <button
+                key={pos}
+                className={`pos-btn ${heroPosition === pos ? "active" : ""}`}
+                onClick={() => setHeroPosition(pos)}
+              >
+                {pos}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Scenario Type */}
+        <div className="control-group">
+          <label>场景类型</label>
+          <div className="scenario-buttons">
+            <button
+              className={`scenario-btn ${scenarioType === "open" ? "active" : ""}`}
+              onClick={() => setScenarioType("open")}
+            >
+              开池
+            </button>
+            <button
+              className={`scenario-btn ${scenarioType === "face_open" ? "active" : ""}`}
+              onClick={() => setScenarioType("face_open")}
+            >
+              面对开池
+            </button>
+            <button
+              className={`scenario-btn ${scenarioType === "face_3bet" ? "active" : ""}`}
+              onClick={() => setScenarioType("face_3bet")}
+            >
+              面对3-bet
+            </button>
+            <button
+              className={`scenario-btn ${scenarioType === "face_4bet" ? "active" : ""}`}
+              onClick={() => setScenarioType("face_4bet")}
+            >
+              面对4-bet
+            </button>
+          </div>
+        </div>
+
+        {/* Raiser Position (for face_open/face_3bet) */}
+        {(scenarioType === "face_open" || scenarioType === "face_3bet") && (
+          <div className="control-group">
+            <label>开池位置</label>
+            <div className="position-buttons">
+              {POSITIONS.filter((p) => p !== heroPosition).map((pos) => (
+                <button
+                  key={pos}
+                  className={`pos-btn ${raiserPosition === pos ? "active" : ""}`}
+                  onClick={() => setRaiserPosition(pos)}
+                >
+                  {pos}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 3-bettor Position (for face_3bet) */}
+        {scenarioType === "face_3bet" && (
+          <div className="control-group">
+            <label>3-bet位置</label>
+            <div className="position-buttons">
+              {POSITIONS.filter((p) => p !== heroPosition && p !== raiserPosition).map((pos) => (
+                <button
+                  key={pos}
+                  className={`pos-btn ${threeBettor === pos ? "active" : ""}`}
+                  onClick={() => setThreeBettor(pos)}
+                >
+                  {pos}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Stack Size */}
+        <div className="control-group">
+          <label>筹码深度 (BB)</label>
+          <div className="stack-input">
+            <input
+              type="number"
+              min={10}
+              max={500}
+              value={effectiveStack}
+              onChange={(e) => setEffectiveStack(Number(e.target.value))}
+            />
+            <div className="stack-presets">
+              <button onClick={() => setEffectiveStack(20)}>20bb</button>
+              <button onClick={() => setEffectiveStack(50)}>50bb</button>
+              <button onClick={() => setEffectiveStack(100)}>100bb</button>
+              <button onClick={() => setEffectiveStack(200)}>200bb</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Render strategy detail
+  const renderStrategyDetail = () => {
+    const handStrategy = getSelectedHandStrategy();
+    if (!handStrategy) {
+      return (
+        <div className="detail-empty">
+          点击热力图中的手牌查看详细策略
+        </div>
+      );
+    }
+
+    const total = handStrategy.probs.reduce((s, p) => s + p, 0) || 1;
+
+    return (
+      <div className="detail-panel">
+        <div className="detail-hand">{selectedHand}</div>
+        <div className="detail-actions">
+          {handStrategy.actions.map((action, i) => {
+            const prob = handStrategy.probs[i];
+            const pct = (prob / total) * 100;
+            if (pct < 0.5) return null;
+
+            const kind = handStrategy.action_kinds[i] as ActionKey;
+            const actionMeta = ACTIONS.find((a) => a.key === kind);
+            const color = actionMeta?.color || "#666";
+            const label = actionMeta?.label || action;
+
+            return (
+              <div key={action} className="detail-row">
+                <span className="dot" style={{ background: color }} />
+                <span className="action-name">{label}</span>
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${pct}%`, background: color }} />
+                </div>
+                <span className="pct">{pct.toFixed(1)}%</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="app">
+      {/* Header */}
       <header className="app-header">
         <div className="brand">Poker GTO</div>
-        <button className="scenario-pill scenario-btn" onClick={() => setCfgOpen(true)}>
-          {`HU · ${cfg.stack}bb · 开 ${cfg.open_to}x · 3bet ${cfg.threebet_to}`} ⚙
-        </button>
-        <span className={`source-badge ${scenario.source}`}>
-          {scenario.source === "live" ? "实时求解" : "示例数据"}
-        </span>
-        {scenario.meta && (
-          <span className="solve-meta">
-            {scenario.meta.iters} iter · ε={scenario.meta.exploitability.toExponential(2)} ·{" "}
-            {scenario.meta.elapsed_ms}ms
-          </span>
-        )}
-        {totalLocks > 0 && (
-          <span className="lock-pill">
-            🔒 {totalLocks} 处锁定
-            <button className="link-btn" onClick={clearAllLocks}>
-              清空
-            </button>
-          </span>
-        )}
-        <div className="actions">
-          <button disabled>群体倾向</button>
-          {scenario.source === "live" && (
-            <button onClick={resetToMock} disabled={solving}>
-              恢复示例
-            </button>
+        <div className="header-info">
+          {strategyData && (
+            <>
+              <span className="scenario-badge">
+                {getScenarioDescription()}
+              </span>
+              <span className="stat-badge">
+                VPIP: {(strategyData.vpip * 100).toFixed(1)}%
+              </span>
+              <span className="stat-badge">
+                Raise: {(strategyData.raise_freq * 100).toFixed(1)}%
+              </span>
+              {strategyData.call_freq > 0 && (
+                <span className="stat-badge">
+                  Call: {(strategyData.call_freq * 100).toFixed(1)}%
+                </span>
+              )}
+            </>
           )}
-          <button onClick={() => setConsoleOpen(true)}>玩具博弈</button>
-          <button className="primary" onClick={runPreflopSolve} disabled={solving}>
-            {solving ? "求解中…" : totalLocks > 0 ? `带锁求解 (${totalLocks})` : "求解翻前"}
-          </button>
         </div>
+        {loading && <span className="loading-indicator">加载中...</span>}
+        {error && <span className="error-indicator">{error}</span>}
       </header>
 
-      {solveErr && (
-        <div className="banner-error">
-          求解失败：{solveErr}（确认后端 uvicorn 是否在 8090 上运行）
-        </div>
-      )}
-
-      <SolverConsole open={consoleOpen} onClose={() => setConsoleOpen(false)} />
-      <ScenarioConfig
-        open={cfgOpen}
-        initial={cfg}
-        onClose={() => setCfgOpen(false)}
-        onSave={(next) => {
-          setCfg(next);
-          setCfgOpen(false);
-        }}
-      />
-
-      <main className="panels">
-        <section className="panel">
-          <PanelHeader s={oop} />
-          <RangeHeatmap
-            strategy={oop.strategy}
-            lockedHands={oopLockSet}
-            selected={oopSel?.hand ?? null}
-            onSelect={(hand, strategy) => setOopSel({ hand, strategy })}
-          />
-          <StrategyDetail
-            hand={oopSel?.hand ?? null}
-            strategy={oopSel?.strategy ?? null}
-            meta={oop.meta}
-            currentLock={oopSel ? locks.oop[oopSel.hand] : undefined}
-            onLock={(probs) => oopSel && setLock("oop", oopSel.hand, probs)}
-            onUnlock={() => oopSel && clearLock("oop", oopSel.hand)}
-          />
+      {/* Main Content - Left/Right Split */}
+      <main className="main-content">
+        {/* Left Side - Heatmap */}
+        <section className="left-panel">
+          <div className="panel-header">
+            <h3>手牌策略热力图</h3>
+            <div className="legend">
+              {ACTIONS.map((a) => (
+                <div key={a.key} className="legend-item">
+                  <span className="dot" style={{ background: a.color }} />
+                  {a.label}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="heatmap-container">
+            <RangeHeatmap
+              strategy={getHeatmapStrategy()}
+              onSelect={(hand) => setSelectedHand(hand)}
+              selected={selectedHand}
+            />
+          </div>
+          {renderStrategyDetail()}
         </section>
 
-        <section className="panel">
-          <PanelHeader s={ip} />
-          <RangeHeatmap
-            strategy={ip.strategy}
-            lockedHands={ipLockSet}
-            selected={ipSel?.hand ?? null}
-            onSelect={(hand, strategy) => setIpSel({ hand, strategy })}
-          />
-          <StrategyDetail
-            hand={ipSel?.hand ?? null}
-            strategy={ipSel?.strategy ?? null}
-            meta={ip.meta}
-            currentLock={ipSel ? locks.ip[ipSel.hand] : undefined}
-            onLock={(probs) => ipSel && setLock("ip", ipSel.hand, probs)}
-            onUnlock={() => ipSel && clearLock("ip", ipSel.hand)}
-          />
+        {/* Right Side - Table Scene */}
+        <section className="right-panel">
+          <div className="panel-header">
+            <h3>牌局实况</h3>
+          </div>
+
+          {/* Table Visualization */}
+          <div className="table-scene">
+            <div className="poker-table">
+              <div className="table-center">
+                <div className="pot-area">底池</div>
+              </div>
+              {/* Position seats */}
+              <div className="seats">
+                {POSITIONS.slice(0, tableSize).map((pos, i) => {
+                  const angle = (i * 360) / tableSize - 90;
+                  const isHero = pos === heroPosition;
+                  const isRaiser = pos === raiserPosition;
+                  const isThreeBettor = pos === threeBettor;
+
+                  return (
+                    <div
+                      key={pos}
+                      className={`seat ${isHero ? "hero" : ""} ${isRaiser ? "raiser" : ""} ${isThreeBettor ? "three-bettor" : ""}`}
+                      style={{
+                        transform: `rotate(${angle}deg) translateY(-140px) rotate(-${angle}deg)`,
+                      }}
+                    >
+                      <div className="seat-position">{pos}</div>
+                      <div className="seat-stack">{effectiveStack}bb</div>
+                      {isHero && <div className="seat-cards">🂠🂠</div>}
+                      {isRaiser && <div className="seat-action">开池</div>}
+                      {isThreeBettor && <div className="seat-action">3-bet</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Scenario Controls */}
+          {renderScenarioControls()}
+
+          {/* Action History */}
+          <div className="action-history">
+            <h4>操作记录</h4>
+            {renderActionHistory()}
+          </div>
         </section>
       </main>
-
-      <footer className="legend">
-        {ACTIONS.map((a) => (
-          <div key={a.key} className="legend-item">
-            <span className="dot" style={{ background: a.color }} />
-            {a.label}
-          </div>
-        ))}
-      </footer>
     </div>
   );
 }

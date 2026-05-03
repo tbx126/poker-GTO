@@ -303,3 +303,55 @@ class OpeningRangeResponse(BaseModel):
     vpip: float
     description: str
     hands: dict[str, float]
+
+
+# ----- Preflop Strategy Matrix (169 hands) -----
+
+
+class PreflopScenarioRequest(BaseModel):
+    """Request for preflop strategy matrix."""
+    
+    table_size: int = Field(default=6, ge=6, le=9)
+    effective_stack: float = Field(default=100.0, gt=0)
+    
+    # Hero's position
+    hero_position: str = Field(description="Hero position (UTG/HJ/CO/BTN/SB/BB)")
+    
+    # Action history
+    scenario_type: str = Field(
+        default="open",
+        description="Scenario type: open/face_open/face_3bet/face_4bet"
+    )
+    
+    # For face_open/face_3bet scenarios
+    raiser_position: str | None = None
+    raise_size: float = 2.5
+    
+    # For face_3bet/face_4bet scenarios
+    three_bettor: str | None = None
+    three_bet_size: float = 9.0
+
+
+class HandStrategy(BaseModel):
+    """Strategy for a single hand class."""
+    
+    hand: str
+    actions: list[str]
+    probs: list[float]
+    action_kinds: list[str]  # Color categories for frontend
+
+
+class PreflopStrategyResponse(BaseModel):
+    """Response with 169 hand strategies."""
+    
+    scenario_description: str
+    hero_position: str
+    scenario_type: str
+    
+    # 169 hand strategies
+    strategies: dict[str, HandStrategy]
+    
+    # Summary stats
+    vpip: float  # Expected VPIP
+    raise_freq: float  # Expected raise frequency
+    call_freq: float  # Expected call frequency

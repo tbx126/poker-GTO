@@ -21,6 +21,8 @@ from api.schemas import (
     PlayerStatsResponse,
     PreflopRequest,
     PreflopResponse,
+    PreflopScenarioRequest,
+    PreflopStrategyResponse,
     ScenarioAnalysisRequest,
     ScenarioAnalysisResponse,
     ScenarioRequest,
@@ -29,6 +31,21 @@ from api.schemas import (
     SolveResponse,
     TendencyReportResponse,
     TrainingStatsResponse,
+)
+from api.service import (
+    analyze_table_scenario,
+    detect_player_leaks,
+    generate_training_scenario,
+    get_player_stats,
+    get_population_tendency,
+    get_position_opening_range,
+    get_preflop_strategy_matrix,
+    get_training_stats,
+    solve,
+    solve_postflop,
+    solve_preflop,
+    submit_training_action,
+    upload_hand_history,
 )
 from api.service import (
     analyze_table_scenario,
@@ -186,5 +203,23 @@ def get_opening_range_endpoint(req: OpeningRangeRequest) -> OpeningRangeResponse
     """Get opening range for a position."""
     try:
         return get_position_opening_range(req.position, req.stack_depth, req.table_size)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@app.post("/strategy/preflop_matrix", response_model=PreflopStrategyResponse)
+def get_preflop_matrix_endpoint(req: PreflopScenarioRequest) -> PreflopStrategyResponse:
+    """Get 169 hand preflop strategy matrix for a scenario."""
+    try:
+        return get_preflop_strategy_matrix(
+            table_size=req.table_size,
+            effective_stack=req.effective_stack,
+            hero_position=req.hero_position,
+            scenario_type=req.scenario_type,
+            raiser_position=req.raiser_position,
+            raise_size=req.raise_size,
+            three_bettor=req.three_bettor,
+            three_bet_size=req.three_bet_size,
+        )
     except Exception as e:
         raise HTTPException(status_code=422, detail=str(e)) from e

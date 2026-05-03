@@ -16,9 +16,13 @@ from api.schemas import (
     GameName,
     HandHistoryUpload,
     LeakReportResponse,
+    OpeningRangeRequest,
+    OpeningRangeResponse,
     PlayerStatsResponse,
     PreflopRequest,
     PreflopResponse,
+    ScenarioAnalysisRequest,
+    ScenarioAnalysisResponse,
     ScenarioRequest,
     ScenarioResponse,
     SolveRequest,
@@ -27,10 +31,13 @@ from api.schemas import (
     TrainingStatsResponse,
 )
 from api.service import (
+    analyze_table_scenario,
     detect_player_leaks,
     generate_training_scenario,
     get_player_stats,
+    get_player_stats,
     get_population_tendency,
+    get_position_opening_range,
     get_training_stats,
     solve,
     solve_postflop,
@@ -150,3 +157,34 @@ def get_training_stats_endpoint() -> TrainingStatsResponse:
         return get_training_stats()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ----- Strategy Analysis endpoints -----
+
+
+@app.post("/strategy/analyze", response_model=ScenarioAnalysisResponse)
+def analyze_scenario_endpoint(req: ScenarioAnalysisRequest) -> ScenarioAnalysisResponse:
+    """Analyze a poker scenario and get GTO recommendation."""
+    try:
+        return analyze_table_scenario(
+            table_size=req.table_size,
+            effective_stack=req.effective_stack,
+            ante=req.ante,
+            hero_position=req.hero_position,
+            hero_hand=req.hero_hand,
+            raiser_position=req.raiser_position,
+            raise_size=req.raise_size,
+            three_bettor=req.three_bettor,
+            three_bet_size=req.three_bet_size,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+
+
+@app.post("/strategy/range", response_model=OpeningRangeResponse)
+def get_opening_range_endpoint(req: OpeningRangeRequest) -> OpeningRangeResponse:
+    """Get opening range for a position."""
+    try:
+        return get_position_opening_range(req.position, req.stack_depth, req.table_size)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e

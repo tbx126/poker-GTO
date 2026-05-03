@@ -252,3 +252,54 @@ class TrainingStatsResponse(BaseModel):
     total_attempts: int
     accuracy: float
     avg_ev_loss: float
+
+
+# ----- Strategy Analysis (6-max/7-max) -----
+
+
+class ScenarioAnalysisRequest(BaseModel):
+    """Request for scenario analysis."""
+    
+    table_size: int = Field(default=6, ge=6, le=9, description="Table size (6 or 7 max)")
+    effective_stack: float = Field(default=100.0, gt=0, description="Effective stack in BB")
+    ante: float = Field(default=0.0, ge=0, description="Ante size in BB")
+    
+    hero_position: str = Field(description="Hero's position (UTG/HJ/CO/BTN/SB/BB)")
+    hero_hand: str = Field(description="Hero's hand (e.g., 'AKs', 'TT', 'JTo')")
+    
+    # Action history (optional)
+    raiser_position: str | None = Field(default=None, description="Who opened")
+    raise_size: float = Field(default=2.5, description="Open size in BB")
+    three_bettor: str | None = Field(default=None, description="Who 3-bet")
+    three_bet_size: float = Field(default=9.0, description="3-bet size in BB")
+
+
+class ScenarioAnalysisResponse(BaseModel):
+    """Response for scenario analysis."""
+    
+    scenario_description: str
+    recommended_action: str
+    action_frequency: float
+    action_frequencies: dict[str, float]
+    explanation: str
+    key_points: list[str]
+    hand_in_range: bool
+    range_percentile: float
+
+
+class OpeningRangeRequest(BaseModel):
+    """Request for opening range."""
+    
+    position: str = Field(description="Position (UTG/HJ/CO/BTN)")
+    stack_depth: float = Field(default=100.0, description="Stack depth in BB")
+    table_size: int = Field(default=6, ge=6, le=9)
+
+
+class OpeningRangeResponse(BaseModel):
+    """Response for opening range."""
+    
+    position: str
+    stack_depth: float
+    vpip: float
+    description: str
+    hands: dict[str, float]

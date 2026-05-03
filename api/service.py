@@ -529,3 +529,94 @@ def get_training_stats() -> dict:
         accuracy=stats["accuracy"],
         avg_ev_loss=stats["avg_ev_loss"],
     )
+
+
+# ----- Strategy Analysis (6-max/7-max) -----
+
+
+def analyze_table_scenario(
+    table_size: int,
+    effective_stack: float,
+    ante: float,
+    hero_position: str,
+    hero_hand: str,
+    raiser_position: str = None,
+    raise_size: float = 2.5,
+    three_bettor: str = None,
+    three_bet_size: float = 9.0,
+) -> dict:
+    """Analyze a poker scenario at a multi-table game."""
+    from api.schemas import ScenarioAnalysisResponse
+    from strategy.positions import Position
+    from strategy.scenarios import (
+        TableScenario,
+        analyze_scenario,
+        get_scenario_description,
+    )
+    
+    # Parse positions
+    pos_map = {
+        "UTG": Position.UTG, "UTG1": Position.UTG1, "MP": Position.MP,
+        "HJ": Position.HJ, "CO": Position.CO, "BTN": Position.BTN,
+        "SB": Position.SB, "BB": Position.BB,
+    }
+    
+    hero_pos = pos_map.get(hero_position.upper())
+    if not hero_pos:
+        raise ValueError(f"Invalid position: {hero_position}")
+    
+    villain_pos = pos_map.get(raiser_position.upper()) if raiser_position else None
+    three_bet_pos = pos_map.get(three_bettor.upper()) if three_bettor else None
+    
+    # Create scenario
+    scenario = TableScenario(
+        table_size=table_size,
+        ante=ante,
+        effective_stack=effective_stack,
+        hero_position=hero_pos,
+        hero_hand=hero_hand,
+        raiser_position=villain_pos,
+        raise_size=raise_size,
+        three_bettor=three_bet_pos,
+        three_bet_size=three_bet_size,
+    )
+    
+    # Analyze
+    analysis = analyze_scenario(scenario)
+    
+    return ScenarioAnalysisResponse(
+        scenario_description=get_scenario_description(scenario),
+        recommended_action=analysis.recommended_action.value,
+        action_frequency=analysis.action_frequency,
+        action_frequencies=analysis.action_frequencies,
+        explanation=analysis.explanation,
+        key_points=analysis.key_points,
+        hand_in_range=analysis.hand_in_range,
+        range_percentile=analysis.range_percentile,
+    )
+
+
+def get_position_opening_range(position: str, stack_depth: float = 100.0, table_size: int = 6) -> dict:
+    """Get opening range for a position."""
+    from api.schemas import OpeningRangeResponse
+    from strategy.positions import Position
+    from strategy.ranges import get_opening_range
+    
+    pos_map = {
+        "UTG": Position.UTG, "UTG1": Position.UTG1, "MP": Position.MP,
+        "HJ": Position.HJ, "CO": Position.CO, "BTN": Position.BTN,
+    }
+    
+    pos = pos_map.get(position.upper())
+    if not pos:
+        raise ValueError(f"Invalid position: {position}")
+    
+    opening_range = get_opening_range(pos, stack_depth, table_size)
+    
+    return OpeningRangeResponse(
+        position=position,
+        stack_depth=stack_depth,
+        vpip=opening_range.vpip,
+        description=opening_range.description,
+        hands=opening_range.hands,
+    )

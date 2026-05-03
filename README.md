@@ -9,6 +9,7 @@ engine/       位棋盘状态、手牌评估、合法动作树
 solver/       CFR+ 表格求解器（Kuhn / Leduc）+ Deep CFR 神经网络求解器
 solver/deep_cfr/  Deep CFR 模块：价值网络、策略网络、Grouped-Token 编码器
 solver/games/ 游戏实现：Kuhn、Leduc、翻后德州扑克
+strategy/     多人桌策略：位置定义、开池范围、3-bet范围、场景分析
 api/          FastAPI 服务层
 mda/          MDA 数据分析引擎：手牌历史解析、玩家画像、群体倾向分析
 trainer/      GTO Trainer：训练场景、反馈引擎、漏洞检测、间隔重复
@@ -25,6 +26,7 @@ tests/        pytest 单元与收敛测试
 - [x] **M2.7** 参数化下注树：自定义筹码深度 / SB-BB / 开池 / 3bet / 4bet；动作色彩按尺度自适应
 - [x] **M3** Deep CFR + Grouped-Token Transformer（神经价值网络替换表格）
 - [x] **M4** MDA 引擎 / Trainer 闭环
+- [x] **M5** 6-max/7-max 多人桌策略分析
 
 ### M2.5 已知简化
 
@@ -74,6 +76,24 @@ tests/        pytest 单元与收敛测试
   - `POST /trainer/action`：提交训练动作
   - `GET /trainer/stats`：训练统计
 
+### M5 新增功能
+
+- **多人桌策略模块** (`strategy/`)
+  - `positions.py`：6-max/7-max 位置定义和相对位置计算
+  - `ranges.py`：GTO 开池范围（UTG/HJ/CO/BTN）和 3-bet 范围
+  - `scenarios.py`：场景分析引擎（开池/面对开池/面对3-bet/面对4-bet）
+
+- **新增 API 端点**
+  - `POST /strategy/analyze`：分析扑克场景并获取 GTO 建议
+  - `POST /strategy/range`：获取指定位置的开池范围
+
+- **具体功能**
+  - 6-max/7-max 位置策略（UTG/HJ/CO/BTN/SB/BB）
+  - 翻前开池范围（基于筹码深度）
+  - 3-bet/4-bet 范围（价值/诈唬/跟注）
+  - 面对加注的防守策略
+  - 场景分析和 GTO 建议
+
 ## 快速开始
 
 ```powershell
@@ -81,7 +101,7 @@ tests/        pytest 单元与收敛测试
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-pytest          # 99 项测试
+pytest          # 119 项测试
 
 # 启动后端（任选端口）
 python -m uvicorn api.main:app --port 8090 --reload

@@ -143,16 +143,17 @@ BTN_RANGE_100BB = {
 
 
 def get_opening_range(position: Position, stack_depth: float = 100.0, table_size: int = 6) -> OpeningRange:
-    """Get GTO opening range for a position.
-    
+    """Get GTO opening range for a position at a 6-max table.
+
     Args:
         position: Position to get range for
         stack_depth: Stack size in big blinds
-        table_size: Number of players at table (6 or 7)
-    
+        table_size: Reserved (6-max only)
+
     Returns:
         OpeningRange with hand frequencies
     """
+    del table_size
     # Select base range
     if position == Position.UTG:
         base = UTG_RANGE_100BB
@@ -282,4 +283,182 @@ def get_3bet_range(hero: Position, villain: Position, stack_depth: float = 100.0
         bluff_hands=bluffs,
         call_hands=calls,
         description=desc,
+    )
+
+
+# ============================================================
+# Defense ranges (call + 3-bet) for facing an open
+# ============================================================
+
+
+@dataclass
+class DefenseRange:
+    """Hero's response to a single open: aggregate call & 3-bet frequencies."""
+    hero_position: Position
+    villain_position: Position
+    raise_hands: dict[str, float] = field(default_factory=dict)  # 3-bet (value + bluff)
+    call_hands: dict[str, float] = field(default_factory=dict)
+    description: str = ""
+
+
+# BB defense vs BTN open (2.5x, 100bb) — baseline for OOP defense.
+# Each entry: (call_freq, raise_freq). Tuned so combo-weighted output
+# vs BTN gives ~50% VPIP and ~13% 3-bet; tighter villains scale down both.
+_BB_DEFENSE_BASELINE: dict[str, tuple[float, float]] = {
+    # --- Premium 3-bet (always) ---
+    "AA": (0.0, 1.0), "KK": (0.0, 1.0), "QQ": (0.0, 1.0),
+    "AKs": (0.0, 1.0), "AKo": (0.0, 1.0),
+    "JJ": (0.05, 0.95),
+    # --- Strong mixed value ---
+    "TT": (0.25, 0.75),
+    "AQs": (0.05, 0.95), "AQo": (0.3, 0.7),
+    "AJs": (0.2, 0.8), "ATs": (0.5, 0.5),
+    "KQs": (0.25, 0.75), "KJs": (0.45, 0.55), "KTs": (0.7, 0.3),
+    # --- Pairs (call + 3-bet for value/protection) ---
+    "99": (0.45, 0.55), "88": (0.7, 0.3),
+    "77": (0.85, 0.15), "66": (0.95, 0.05), "55": (1.0, 0.0),
+    "44": (1.0, 0.0), "33": (1.0, 0.0), "22": (1.0, 0.0),
+    # --- Suited aces (low-A polarized bluffs) ---
+    "A9s": (0.6, 0.4), "A8s": (0.4, 0.6),
+    "A7s": (0.3, 0.7), "A6s": (0.3, 0.7),
+    "A5s": (0.0, 1.0), "A4s": (0.0, 1.0),
+    "A3s": (0.2, 0.8), "A2s": (0.4, 0.6),
+    # --- Suited kings/queens (mid-suited K as bluffs) ---
+    "K9s": (0.55, 0.45), "K8s": (0.5, 0.5), "K7s": (0.55, 0.4),
+    "K6s": (0.7, 0.25), "K5s": (0.7, 0.15), "K4s": (0.6, 0.0),
+    "K3s": (0.45, 0.0), "K2s": (0.3, 0.0),
+    "QJs": (0.95, 0.05), "QTs": (1.0, 0.0), "Q9s": (1.0, 0.0),
+    "Q8s": (0.95, 0.0), "Q7s": (0.7, 0.0), "Q6s": (0.5, 0.0),
+    "Q5s": (0.4, 0.0), "Q4s": (0.25, 0.0), "Q3s": (0.15, 0.0),
+    # --- Suited jacks/tens ---
+    "JTs": (1.0, 0.0), "J9s": (1.0, 0.0), "J8s": (0.9, 0.0),
+    "J7s": (0.55, 0.0), "J6s": (0.3, 0.0), "J5s": (0.2, 0.0),
+    "T9s": (1.0, 0.0), "T8s": (1.0, 0.0), "T7s": (0.75, 0.0),
+    "T6s": (0.4, 0.0), "T5s": (0.2, 0.0),
+    # --- Suited connectors / one-gappers ---
+    "98s": (1.0, 0.0), "97s": (0.85, 0.0), "96s": (0.5, 0.0), "95s": (0.25, 0.0),
+    "87s": (1.0, 0.0), "86s": (0.7, 0.0), "85s": (0.4, 0.0),
+    "76s": (1.0, 0.0), "75s": (0.65, 0.0), "74s": (0.3, 0.0),
+    "65s": (1.0, 0.0), "64s": (0.55, 0.0),
+    "54s": (0.95, 0.0), "53s": (0.55, 0.0),
+    "43s": (0.55, 0.0), "42s": (0.2, 0.0),
+    "32s": (0.25, 0.0),
+    # --- Offsuit broadways ---
+    "AJo": (0.85, 0.15), "ATo": (1.0, 0.0),
+    "A9o": (0.95, 0.05), "A8o": (0.7, 0.0),
+    "A7o": (0.5, 0.0), "A6o": (0.4, 0.0),
+    "A5o": (0.6, 0.0), "A4o": (0.4, 0.0),
+    "A3o": (0.3, 0.0), "A2o": (0.25, 0.0),
+    "KQo": (0.85, 0.15), "KJo": (0.9, 0.1),
+    "KTo": (1.0, 0.0), "K9o": (0.8, 0.0), "K8o": (0.45, 0.0),
+    "K7o": (0.25, 0.0), "K6o": (0.15, 0.0),
+    "QJo": (0.95, 0.05), "QTo": (1.0, 0.0),
+    "Q9o": (0.7, 0.0), "Q8o": (0.35, 0.0), "Q7o": (0.15, 0.0),
+    "JTo": (1.0, 0.0), "J9o": (0.8, 0.0), "J8o": (0.45, 0.0),
+    "J7o": (0.2, 0.0),
+    # --- Offsuit connectors ---
+    "T9o": (0.95, 0.0), "T8o": (0.55, 0.0), "T7o": (0.2, 0.0),
+    "98o": (0.7, 0.0), "97o": (0.3, 0.0),
+    "87o": (0.5, 0.0), "86o": (0.15, 0.0),
+    "76o": (0.4, 0.0), "65o": (0.3, 0.0),
+    "54o": (0.2, 0.0),
+}
+
+
+# Tightness multiplier (call freq) by villain position. BTN=baseline (1.0).
+# Earlier opens are stronger -> defend less.
+_DEFENSE_TIGHTNESS_BY_VILLAIN: dict[Position, float] = {
+    Position.BTN: 1.0,
+    Position.CO: 0.85,
+    Position.HJ: 0.72,
+    Position.UTG: 0.55,
+    Position.SB: 1.15,  # SB raise is wider; BB defends wider in turn
+}
+
+
+def get_defense_range(
+    hero: Position, villain: Position, stack_depth: float = 100.0
+) -> DefenseRange:
+    """Hero's call + 3-bet response to a single open.
+
+    BB/SB use a wide OOP defense table scaled by villain tightness.
+    IP positions cold-call rarely in GTO; we fall back to 3-bet-or-fold
+    via :func:`get_3bet_range` plus a thin pair/broadway flat range.
+    """
+    is_oop = hero in (Position.BB, Position.SB)
+    if not is_oop:
+        return _ip_defense_range(hero, villain, stack_depth)
+
+    tightness = _DEFENSE_TIGHTNESS_BY_VILLAIN.get(villain, 0.85)
+
+    # SB defends slightly tighter (OOP postflop, dead 0.5bb already in)
+    # but 3-bets more to deny equity. raise_boost partially offsets the
+    # tightness scaling on raise_p.
+    if hero == Position.SB:
+        tightness *= 0.85
+        raise_boost = 1.25
+    else:
+        raise_boost = 1.0
+
+    # Tightness applies to BOTH calls and 3-bets — vs UTG opens we have
+    # less fold equity AND fewer +EV calls, so both shrink.
+    raise_scale = tightness * raise_boost
+
+    raise_hands: dict[str, float] = {}
+    call_hands: dict[str, float] = {}
+    for hand, (call_p, raise_p) in _BB_DEFENSE_BASELINE.items():
+        adj_raise = min(1.0, raise_p * raise_scale)
+        adj_call = call_p * tightness
+        if adj_call + adj_raise > 1.0:
+            adj_call = max(0.0, 1.0 - adj_raise)
+        if adj_raise > 1e-6:
+            raise_hands[hand] = adj_raise
+        if adj_call > 1e-6:
+            call_hands[hand] = adj_call
+
+    desc = f"{hero.value.upper()} defense vs {villain.value.upper()} open"
+    return DefenseRange(
+        hero_position=hero,
+        villain_position=villain,
+        raise_hands=raise_hands,
+        call_hands=call_hands,
+        description=desc,
+    )
+
+
+def _ip_defense_range(
+    hero: Position, villain: Position, stack_depth: float
+) -> DefenseRange:
+    """IP cold-call vs open: thin pairs + broadways flat, 3-bet-or-fold elsewhere."""
+    threebet = get_3bet_range(hero, villain, stack_depth)
+
+    raise_hands: dict[str, float] = {}
+    for h, f in threebet.value_hands.items():
+        raise_hands[h] = max(raise_hands.get(h, 0.0), f)
+    for h, f in threebet.bluff_hands.items():
+        raise_hands[h] = max(raise_hands.get(h, 0.0), f)
+
+    # IP cold-call is narrow even in GTO; mostly small/mid pairs and a few suited broadways.
+    flat_baseline = {
+        "TT": 0.5, "99": 0.7, "88": 0.7, "77": 0.7,
+        "66": 0.6, "55": 0.5, "44": 0.4, "33": 0.3, "22": 0.3,
+        "AJs": 0.4, "ATs": 0.6, "KQs": 0.5, "KJs": 0.4,
+        "QJs": 0.5, "QTs": 0.4, "JTs": 0.5, "T9s": 0.4,
+        "98s": 0.3, "87s": 0.2,
+    }
+
+    call_hands: dict[str, float] = {}
+    for h, f in flat_baseline.items():
+        # Don't let call overlap with the existing 3-bet on the same hand.
+        cap = max(0.0, 1.0 - raise_hands.get(h, 0.0))
+        if cap <= 0:
+            continue
+        call_hands[h] = min(f, cap)
+
+    return DefenseRange(
+        hero_position=hero,
+        villain_position=villain,
+        raise_hands=raise_hands,
+        call_hands=call_hands,
+        description=f"{hero.value.upper()} IP cold-call vs {villain.value.upper()} open",
     )

@@ -554,9 +554,9 @@ def analyze_table_scenario(
         get_scenario_description,
     )
     
-    # Parse positions
+    # Parse positions (6-max only)
     pos_map = {
-        "UTG": Position.UTG, "UTG1": Position.UTG1, "MP": Position.MP,
+        "UTG": Position.UTG,
         "HJ": Position.HJ, "CO": Position.CO, "BTN": Position.BTN,
         "SB": Position.SB, "BB": Position.BB,
     }
@@ -603,7 +603,7 @@ def get_position_opening_range(position: str, stack_depth: float = 100.0, table_
     from strategy.ranges import get_opening_range
     
     pos_map = {
-        "UTG": Position.UTG, "UTG1": Position.UTG1, "MP": Position.MP,
+        "UTG": Position.UTG,
         "HJ": Position.HJ, "CO": Position.CO, "BTN": Position.BTN,
     }
     
@@ -635,12 +635,12 @@ def get_preflop_strategy_matrix(
     """Get 169 hand preflop strategy matrix for a scenario."""
     from api.schemas import PreflopStrategyResponse, HandStrategy
     from strategy.positions import Position
-    from strategy.ranges import get_opening_range, get_3bet_range
+    from strategy.ranges import get_opening_range, get_3bet_range, get_defense_range
     from engine.hand_class import all_classes
     
-    # Position mapping
+    # Position mapping (6-max only)
     pos_map = {
-        "UTG": Position.UTG, "UTG1": Position.UTG1, "MP": Position.MP,
+        "UTG": Position.UTG,
         "HJ": Position.HJ, "CO": Position.CO, "BTN": Position.BTN,
         "SB": Position.SB, "BB": Position.BB,
     }
@@ -664,13 +664,24 @@ def get_preflop_strategy_matrix(
             "3bet": "bet_100",
             "4bet": "bet_150",
             "shove": "allin",
+            "allin": "allin",
         }
         return [kind_map.get(a, "bet_75") for a in actions]
     
+    def _combo_weighted(action_idx: int) -> float:
+        total = 0
+        weighted = 0.0
+        for cls_ in classes:
+            label_ = cls_.label
+            combos = 6 if len(label_) == 2 else (4 if label_.endswith("s") else 12)
+            total += combos
+            weighted += combos * strategies[label_].probs[action_idx]
+        return weighted / max(total, 1)
+
     if scenario_type == "open":
         # Opening scenario
         opening_range = get_opening_range(hero_pos, effective_stack, table_size)
-        
+
         for cls in classes:
             freq = opening_range.hands.get(cls.label, 0.0)
             actions = ["fold", "open"]
@@ -681,9 +692,8 @@ def get_preflop_strategy_matrix(
                 probs=probs,
                 action_kinds=get_action_kinds(actions),
             )
-        
-        # Calculate stats
-        vpip = sum(s.probs[1] for s in strategies.values()) / len(strategies)
+
+        vpip = _combo_weighted(1)
         return PreflopStrategyResponse(
             scenario_description=f"{hero_position} open, {effective_stack}bb",
             hero_position=hero_position,
@@ -695,34 +705,35 @@ def get_preflop_strategy_matrix(
         )
     
     elif scenario_type == "face_open":
-        # Facing an open raise
+        # Facing an open raise — uses position-aware defense range
         villain_pos = pos_map.get(raiser_position.upper()) if raiser_position else Position.BTN
-        three_bet_range = get_3bet_range(hero_pos, villain_pos, effective_stack)
-        
+        defense = get_defense_range(hero_pos, villain_pos, effective_stack)
+
         for cls in classes:
             label = cls.label
-            value_freq = three_bet_range.value_hands.get(label, 0.0)
-            bluff_freq = three_bet_range.bluff_hands.get(label, 0.0)
-            call_freq = three_bet_range.call_hands.get(label, 0.0)
-            
-            # Normalize
-            total = value_freq + bluff_freq + call_freq
-            fold_freq = max(0, 1.0 - total)
-            
+            call_p = defense.call_hands.get(label, 0.0)
+            raise_p = defense.raise_hands.get(label, 0.0)
+            total = call_p + raise_p
+            if total > 1.0:
+                # Renormalize defensively (shouldn't trigger; ranges already capped)
+                call_p /= total
+                raise_p /= total
+                total = 1.0
+            fold_freq = max(0.0, 1.0 - total)
+
             actions = ["fold", "call", "3bet"]
-            probs = [fold_freq, call_freq, value_freq + bluff_freq]
+            probs = [fold_freq, call_p, raise_p]
             strategies[label] = HandStrategy(
                 hand=label,
                 actions=actions,
                 probs=probs,
                 action_kinds=get_action_kinds(actions),
             )
-        
-        # Calculate stats
-        raise_freq = sum(s.probs[2] for s in strategies.values()) / len(strategies)
-        call_freq = sum(s.probs[1] for s in strategies.values()) / len(strategies)
-        vpip = raise_freq + call_freq
-        
+
+        call_freq = _combo_weighted(1)
+        raise_freq = _combo_weighted(2)
+        vpip = call_freq + raise_freq
+
         return PreflopStrategyResponse(
             scenario_description=f"{hero_position} vs {raiser_position} open ({raise_size}bb)",
             hero_position=hero_position,
@@ -734,38 +745,33 @@ def get_preflop_strategy_matrix(
         )
     
     elif scenario_type == "face_3bet":
-        # Facing a 3-bet
+        # Facing a 3-bet — hero opened, threeBettor 3-bet
         three_bet_pos = pos_map.get(three_bettor.upper()) if three_bettor else Position.BTN
-        
+
         # Premium hands
         premium_4bet = {"AA": 1.0, "KK": 1.0, "AKs": 1.0}
         strong_call = {"QQ": 0.75, "JJ": 0.5, "AKo": 0.75, "AQs": 0.5}
-        
+
         for cls in classes:
             label = cls.label
-            
+            actions = ["fold", "call", "4bet"]
             if label in premium_4bet:
                 freq = premium_4bet[label]
-                actions = ["fold", "call", "4bet"]
                 probs = [0.0, 0.0, freq]
             elif label in strong_call:
                 freq = strong_call[label]
-                actions = ["fold", "call", "4bet"]
                 probs = [1.0 - freq, freq * 0.7, freq * 0.3]
             else:
-                actions = ["fold", "call", "4bet"]
                 probs = [1.0, 0.0, 0.0]
-            
             strategies[label] = HandStrategy(
                 hand=label,
                 actions=actions,
                 probs=probs,
                 action_kinds=get_action_kinds(actions),
             )
-        
-        # Calculate stats
-        raise_freq = sum(s.probs[2] for s in strategies.values()) / len(strategies)
-        call_freq = sum(s.probs[1] for s in strategies.values()) / len(strategies)
+
+        call_freq = _combo_weighted(1)
+        raise_freq = _combo_weighted(2)
         vpip = raise_freq + call_freq
         
         return PreflopStrategyResponse(
@@ -782,30 +788,24 @@ def get_preflop_strategy_matrix(
         # Facing a 4-bet
         for cls in classes:
             label = cls.label
-            
+            actions = ["fold", "call", "allin"]
             if label == "AA":
-                actions = ["fold", "call", "allin"]
                 probs = [0.0, 0.0, 1.0]
             elif label == "KK":
-                actions = ["fold", "call", "allin"]
                 probs = [0.0, 0.8, 0.2]
             elif label == "AKs":
-                actions = ["fold", "call", "allin"]
                 probs = [0.0, 0.7, 0.3]
             else:
-                actions = ["fold", "call", "allin"]
                 probs = [1.0, 0.0, 0.0]
-            
             strategies[label] = HandStrategy(
                 hand=label,
                 actions=actions,
                 probs=probs,
                 action_kinds=get_action_kinds(actions),
             )
-        
-        # Calculate stats
-        raise_freq = sum(s.probs[2] for s in strategies.values()) / len(strategies)
-        call_freq = sum(s.probs[1] for s in strategies.values()) / len(strategies)
+
+        call_freq = _combo_weighted(1)
+        raise_freq = _combo_weighted(2)
         vpip = raise_freq + call_freq
         
         return PreflopStrategyResponse(

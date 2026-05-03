@@ -24,6 +24,24 @@ interface Props {
   selected?: string | null;
 }
 
+const ACTION_LABEL: Record<ActionKey, string> = ACTIONS.reduce(
+  (acc, a) => ({ ...acc, [a.key]: a.label }),
+  {} as Record<ActionKey, string>,
+);
+
+function buildTooltip(cell: HandCell, strat: HandStrategy, isLocked: boolean): string {
+  const total = ACTION_ORDER_BARS.reduce((s, a) => s + (strat[a] ?? 0), 0);
+  if (total <= 0) return cell.label + " · 无策略";
+  const lines: string[] = [cell.label];
+  for (const a of ACTION_ORDER_BARS) {
+    const v = strat[a] ?? 0;
+    if (v < 0.005) continue;
+    lines.push(`${ACTION_LABEL[a]}: ${(v * 100).toFixed(1)}%`);
+  }
+  if (isLocked) lines.push("· 已锁定");
+  return lines.join("\n");
+}
+
 function StrategyCell({ cell, strat, isSelected, isLocked, onClick }: {
   cell: HandCell;
   strat: HandStrategy;
@@ -41,7 +59,7 @@ function StrategyCell({ cell, strat, isSelected, isLocked, onClick }: {
         isLocked ? "locked" : "",
       ].filter(Boolean).join(" ")}
       onClick={onClick}
-      title={cell.label + (isLocked ? " · 已锁定" : "")}
+      title={buildTooltip(cell, strat, isLocked)}
     >
       <div className="hand-bars">
         {ACTION_ORDER_BARS.map((a) => {

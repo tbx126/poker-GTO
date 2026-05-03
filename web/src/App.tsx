@@ -1,9 +1,21 @@
-import { useState, useEffect, useCallback } from "react";
-import { ACTIONS, type ActionKey, type HandStrategy } from "./actions";
-import type { PreflopScenarioRequest, PreflopStrategyResponse } from "./api";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { ACTIONS, type ActionKey, type HandStrategy as BarStrategy } from "./actions";
+import type { HandStrategy as ApiHandStrategy, PreflopScenarioRequest, PreflopStrategyResponse } from "./api";
 import { getPreflopStrategyMatrix } from "./api";
 import { RangeHeatmap } from "./RangeHeatmap";
 import "./App.css";
+
+/** Reduce API per-action arrays into a per-color-bucket map for the heatmap bars. */
+function apiToBars(apiStrat: ApiHandStrategy): BarStrategy {
+  const out: BarStrategy = {};
+  for (let i = 0; i < apiStrat.actions.length; i++) {
+    const kind = apiStrat.action_kinds[i] as ActionKey;
+    const prob = apiStrat.probs[i] ?? 0;
+    if (prob <= 0) continue;
+    out[kind] = (out[kind] ?? 0) + prob;
+  }
+  return out;
+}
 
 // Positions for 6-max
 const POSITIONS = ["UTG", "HJ", "CO", "BTN", "SB", "BB"] as const;
@@ -23,7 +35,7 @@ export function App() {
   const [heroPosition, setHeroPosition] = useState<Position>("BTN");
   const [scenarioType, setScenarioType] = useState<ScenarioType>("open");
   const [effectiveStack, setEffectiveStack] = useState(100);
-  const [tableSize, setTableSize] = useState(6);
+  const [tableSize] = useState(6);
 
   // Action history
   const [actionHistory, setActionHistory] = useState<ActionRecord[]>([]);
@@ -76,21 +88,41 @@ export function App() {
     fetchStrategy();
   }, [fetchStrategy]);
 
-  // Reset action history when scenario changes
+  // Reset selected positions when hero or scenario changes
   useEffect(() => {
-    setActionHistory([]);
     setRaiserPosition(null);
     setThreeBettor(null);
   }, [scenarioType, heroPosition]);
 
-  // Get strategy for heatmap
-  const getHeatmapStrategy = (): Record<string, HandStrategy> => {
-    if (!strategyData) return {};
-    return strategyData.strategies;
-  };
+  // Auto-populate action history from scenario state
+  useEffect(() => {
+    const history: ActionRecord[] = [];
+    if ((scenarioType === "face_open" || scenarioType === "face_3bet") && raiserPosition) {
+      history.push({ position: raiserPosition, action: "开池加注", size: 2.5 });
+    }
+    if (scenarioType === "face_3bet" && raiserPosition && threeBettor) {
+      history.push({ position: threeBettor, action: "3-bet", size: 9 });
+    }
+    if (scenarioType === "face_4bet") {
+      // Generic representation; UI does not yet expose 4-bettor position.
+      history.push({ position: heroPosition, action: "开池加注", size: 2.5 });
+      history.push({ position: "BB", action: "3-bet", size: 9 });
+      history.push({ position: heroPosition, action: "4-bet", size: 22 });
+    }
+    setActionHistory(history);
+  }, [scenarioType, heroPosition, raiserPosition, threeBettor]);
 
-  // Get selected hand strategy
-  const getSelectedHandStrategy = (): HandStrategy | null => {
+  // Convert API strategies to bar shape once per fetch
+  const heatmapStrategy = useMemo<Record<string, BarStrategy>>(() => {
+    if (!strategyData) return {};
+    const out: Record<string, BarStrategy> = {};
+    for (const [hand, apiStrat] of Object.entries(strategyData.strategies)) {
+      out[hand] = apiToBars(apiStrat);
+    }
+    return out;
+  }, [strategyData]);
+
+  const getSelectedHandStrategy = (): ApiHandStrategy | null => {
     if (!selectedHand || !strategyData) return null;
     return strategyData.strategies[selectedHand] || null;
   };
@@ -101,147 +133,168 @@ export function App() {
     return strategyData.scenario_description;
   };
 
-  // Render action history
+  const SCENARIO_OPTIONS: { key: ScenarioType; label: string }[] = [
+    { key: "open", label: "开池" },
+    { key: "face_open", label: "面对开池" },
+    { key: "face_3bet", label: "面对 3-bet" },
+    { key: "face_4bet", label: "面对 4-bet" },
+  ];
+
+  const STACK_PRESETS = [20, 50, 100, 200];
+
   const renderActionHistory = () => {
     if (actionHistory.length === 0) {
-      return <div className="history-empty">无操作记录</div>;
+      return <div className="history-empty">尚无对手行动</div>;
     }
-
-    return actionHistory.map((record, i) => (
-      <div key={i} className="history-item">
-        <span className="history-position">{record.position}</span>
-        <span className="history-action">{record.action}</span>
-        {record.size && <span className="history-size">{record.size}bb</span>}
-      </div>
-    ));
-  };
-
-  // Render scenario controls
-  const renderScenarioControls = () => {
     return (
-      <div className="scenario-controls">
-        {/* Hero Position */}
-        <div className="control-group">
-          <label>你的位置</label>
-          <div className="position-buttons">
-            {POSITIONS.map((pos) => (
-              <button
-                key={pos}
-                className={`pos-btn ${heroPosition === pos ? "active" : ""}`}
-                onClick={() => setHeroPosition(pos)}
-              >
-                {pos}
-              </button>
-            ))}
+      <div className="history-list">
+        {actionHistory.map((record, i) => (
+          <div key={i} className="history-row">
+            <span className="history-pos">{record.position}</span>
+            <span className="history-act">{record.action}</span>
+            {record.size != null && <span className="history-size">{record.size}bb</span>}
           </div>
-        </div>
-
-        {/* Scenario Type */}
-        <div className="control-group">
-          <label>场景类型</label>
-          <div className="scenario-buttons">
-            <button
-              className={`scenario-btn ${scenarioType === "open" ? "active" : ""}`}
-              onClick={() => setScenarioType("open")}
-            >
-              开池
-            </button>
-            <button
-              className={`scenario-btn ${scenarioType === "face_open" ? "active" : ""}`}
-              onClick={() => setScenarioType("face_open")}
-            >
-              面对开池
-            </button>
-            <button
-              className={`scenario-btn ${scenarioType === "face_3bet" ? "active" : ""}`}
-              onClick={() => setScenarioType("face_3bet")}
-            >
-              面对3-bet
-            </button>
-            <button
-              className={`scenario-btn ${scenarioType === "face_4bet" ? "active" : ""}`}
-              onClick={() => setScenarioType("face_4bet")}
-            >
-              面对4-bet
-            </button>
-          </div>
-        </div>
-
-        {/* Raiser Position (for face_open/face_3bet) */}
-        {(scenarioType === "face_open" || scenarioType === "face_3bet") && (
-          <div className="control-group">
-            <label>开池位置</label>
-            <div className="position-buttons">
-              {POSITIONS.filter((p) => p !== heroPosition).map((pos) => (
-                <button
-                  key={pos}
-                  className={`pos-btn ${raiserPosition === pos ? "active" : ""}`}
-                  onClick={() => setRaiserPosition(pos)}
-                >
-                  {pos}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 3-bettor Position (for face_3bet) */}
-        {scenarioType === "face_3bet" && (
-          <div className="control-group">
-            <label>3-bet位置</label>
-            <div className="position-buttons">
-              {POSITIONS.filter((p) => p !== heroPosition && p !== raiserPosition).map((pos) => (
-                <button
-                  key={pos}
-                  className={`pos-btn ${threeBettor === pos ? "active" : ""}`}
-                  onClick={() => setThreeBettor(pos)}
-                >
-                  {pos}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Stack Size */}
-        <div className="control-group">
-          <label>筹码深度 (BB)</label>
-          <div className="stack-input">
-            <input
-              type="number"
-              min={10}
-              max={500}
-              value={effectiveStack}
-              onChange={(e) => setEffectiveStack(Number(e.target.value))}
-            />
-            <div className="stack-presets">
-              <button onClick={() => setEffectiveStack(20)}>20bb</button>
-              <button onClick={() => setEffectiveStack(50)}>50bb</button>
-              <button onClick={() => setEffectiveStack(100)}>100bb</button>
-              <button onClick={() => setEffectiveStack(200)}>200bb</button>
-            </div>
-          </div>
-        </div>
+        ))}
       </div>
     );
   };
 
-  // Render strategy detail
+  const renderPositionGrid = (
+    selected: Position | null,
+    onPick: (p: Position) => void,
+    disabled?: (p: Position) => boolean,
+  ) => (
+    <div className="position-grid">
+      {POSITIONS.map((pos) => {
+        const isDisabled = disabled?.(pos) ?? false;
+        return (
+          <button
+            key={pos}
+            className={`btn compact ${selected === pos ? "active" : ""}`}
+            onClick={() => !isDisabled && onPick(pos)}
+            aria-disabled={isDisabled}
+          >
+            {pos}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const renderScenarioControls = () => (
+    <>
+      <div className="section">
+        <div className="section-label">你的位置</div>
+        {renderPositionGrid(heroPosition, (p) => setHeroPosition(p))}
+      </div>
+
+      <div className="section">
+        <div className="section-label">场景类型</div>
+        <div className="scenario-grid">
+          {SCENARIO_OPTIONS.map((opt) => (
+            <button
+              key={opt.key}
+              className={`btn ${scenarioType === opt.key ? "active" : ""}`}
+              onClick={() => setScenarioType(opt.key)}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {(scenarioType === "face_open" || scenarioType === "face_3bet") && (
+        <div className="section">
+          <div className="section-label">开池位置</div>
+          {renderPositionGrid(
+            raiserPosition,
+            (p) => setRaiserPosition(p),
+            (p) => p === heroPosition,
+          )}
+        </div>
+      )}
+
+      {scenarioType === "face_3bet" && (
+        <div className="section">
+          <div className="section-label">3-bet 位置</div>
+          {renderPositionGrid(
+            threeBettor,
+            (p) => setThreeBettor(p),
+            (p) => p === heroPosition || p === raiserPosition,
+          )}
+        </div>
+      )}
+
+      <div className="section">
+        <div className="section-label">有效筹码</div>
+        <div className="stack-control">
+          <div className="stack-readout">
+            <div>
+              <span className="stack-value">{effectiveStack}</span>
+              <span className="stack-unit"> bb</span>
+            </div>
+            <input
+              className="stack-num"
+              type="number"
+              min={10}
+              max={500}
+              value={effectiveStack}
+              onChange={(e) => setEffectiveStack(Number(e.target.value) || 0)}
+            />
+          </div>
+          <input
+            className="slider"
+            type="range"
+            min={10}
+            max={300}
+            step={5}
+            value={Math.min(effectiveStack, 300)}
+            onChange={(e) => setEffectiveStack(Number(e.target.value))}
+          />
+          <div className="stack-presets">
+            {STACK_PRESETS.map((v) => (
+              <button
+                key={v}
+                className={`stack-preset ${effectiveStack === v ? "active" : ""}`}
+                onClick={() => setEffectiveStack(v)}
+              >
+                {v}bb
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="section">
+        <div className="section-label">行动顺序</div>
+        {renderActionHistory()}
+      </div>
+    </>
+  );
+
   const renderStrategyDetail = () => {
     const handStrategy = getSelectedHandStrategy();
     if (!handStrategy) {
       return (
         <div className="detail-empty">
-          点击热力图中的手牌查看详细策略
+          点击上方热力图中的任意手牌查看详细策略
         </div>
       );
     }
 
     const total = handStrategy.probs.reduce((s, p) => s + p, 0) || 1;
+    const combos = selectedHand && selectedHand.length === 2
+      ? "6 combos · 对子"
+      : selectedHand?.endsWith("s")
+        ? "4 combos · 同花"
+        : "12 combos · 非同花";
 
     return (
       <div className="detail-panel">
-        <div className="detail-hand">{selectedHand}</div>
+        <div className="detail-head">
+          <span className="detail-hand">{selectedHand}</span>
+          <span className="detail-meta">{combos}</span>
+        </div>
         <div className="detail-actions">
           {handStrategy.actions.map((action, i) => {
             const prob = handStrategy.probs[i];
@@ -269,41 +322,87 @@ export function App() {
     );
   };
 
+  // Pot estimation for table visualization
+  const potBB = (() => {
+    if (scenarioType === "open") return 1.5; // sb + bb
+    if (scenarioType === "face_open") return 4; // 2.5 + 1 + 0.5
+    if (scenarioType === "face_3bet") return 12.5; // 9 + 2.5 + 1 (rough)
+    if (scenarioType === "face_4bet") return 31.5;
+    return 1.5;
+  })();
+
+  const heroIdx = POSITIONS.indexOf(heroPosition);
+  const btnIdx = POSITIONS.indexOf("BTN");
+  const seatRadius = 130;
+
+  const getSeatTransform = (positionIndex: number) => {
+    const offset = ((positionIndex - heroIdx) + tableSize) % tableSize;
+    const angle = (offset * 360) / tableSize + 90;
+    return `translate(-50%, -50%) rotate(${angle}deg) translateY(-${seatRadius}px) rotate(-${angle}deg)`;
+  };
+
+  const getDealerButtonStyle = (): React.CSSProperties => {
+    const offset = ((btnIdx - heroIdx) + tableSize) % tableSize;
+    const angle = (offset * 360) / tableSize + 90;
+    const rad = (angle - 90) * (Math.PI / 180); // -90° because CSS rotates from top
+    const r = seatRadius - 56; // closer to felt edge
+    const x = Math.cos(rad) * r;
+    const y = Math.sin(rad) * r;
+    return {
+      left: `calc(50% + ${x}px - 9px)`,
+      top: `calc(50% + ${y}px - 9px)`,
+    };
+  };
+
   return (
     <div className="app">
       {/* Header */}
       <header className="app-header">
-        <div className="brand">Poker GTO</div>
+        <div className="brand">
+          <span className="brand-name">Poker GTO</span>
+          <span className="brand-tag">preflop trainer</span>
+        </div>
         <div className="header-info">
           {strategyData && (
             <>
-              <span className="scenario-badge">
-                {getScenarioDescription()}
-              </span>
-              <span className="stat-badge">
-                VPIP: {(strategyData.vpip * 100).toFixed(1)}%
-              </span>
-              <span className="stat-badge">
-                Raise: {(strategyData.raise_freq * 100).toFixed(1)}%
-              </span>
-              {strategyData.call_freq > 0 && (
-                <span className="stat-badge">
-                  Call: {(strategyData.call_freq * 100).toFixed(1)}%
+              <span className="scenario-pill">{getScenarioDescription()}</span>
+              <span className="stat-strip">
+                <span className="stat-cell">
+                  <span className="stat-dot" style={{ background: "var(--check-call)" }} />
+                  <span className="stat-key">VPIP</span>
+                  <span className="stat-val">{(strategyData.vpip * 100).toFixed(1)}%</span>
                 </span>
-              )}
+                <span className="stat-cell">
+                  <span className="stat-dot" style={{ background: "var(--bet-100)" }} />
+                  <span className="stat-key">Raise</span>
+                  <span className="stat-val">{(strategyData.raise_freq * 100).toFixed(1)}%</span>
+                </span>
+                {strategyData.call_freq > 0 && (
+                  <span className="stat-cell">
+                    <span className="stat-dot" style={{ background: "var(--accent)" }} />
+                    <span className="stat-key">Call</span>
+                    <span className="stat-val">{(strategyData.call_freq * 100).toFixed(1)}%</span>
+                  </span>
+                )}
+              </span>
             </>
           )}
         </div>
-        {loading && <span className="loading-indicator">加载中...</span>}
-        {error && <span className="error-indicator">{error}</span>}
+        <div className="header-status">
+          {loading && <span className="spinner" aria-label="加载中" />}
+          {error && <span className="error-indicator">{error}</span>}
+        </div>
       </header>
 
-      {/* Main Content - Left/Right Split */}
+      {/* Main Content */}
       <main className="main-content">
         {/* Left Side - Heatmap */}
         <section className="left-panel">
           <div className="panel-header">
-            <h3>手牌策略热力图</h3>
+            <div className="panel-title">
+              手牌策略热力图
+              <span className="panel-sub">169 hand classes</span>
+            </div>
             <div className="legend">
               {ACTIONS.map((a) => (
                 <div key={a.key} className="legend-item">
@@ -315,7 +414,7 @@ export function App() {
           </div>
           <div className="heatmap-container">
             <RangeHeatmap
-              strategy={getHeatmapStrategy()}
+              strategy={heatmapStrategy}
               onSelect={(hand) => setSelectedHand(hand)}
               selected={selectedHand}
             />
@@ -323,53 +422,70 @@ export function App() {
           {renderStrategyDetail()}
         </section>
 
-        {/* Right Side - Table Scene */}
+        {/* Right Side - Table & Controls */}
         <section className="right-panel">
           <div className="panel-header">
-            <h3>牌局实况</h3>
-          </div>
-
-          {/* Table Visualization */}
-          <div className="table-scene">
-            <div className="poker-table">
-              <div className="table-center">
-                <div className="pot-area">底池</div>
-              </div>
-              {/* Position seats */}
-              <div className="seats">
-                {POSITIONS.slice(0, tableSize).map((pos, i) => {
-                  const angle = (i * 360) / tableSize - 90;
-                  const isHero = pos === heroPosition;
-                  const isRaiser = pos === raiserPosition;
-                  const isThreeBettor = pos === threeBettor;
-
-                  return (
-                    <div
-                      key={pos}
-                      className={`seat ${isHero ? "hero" : ""} ${isRaiser ? "raiser" : ""} ${isThreeBettor ? "three-bettor" : ""}`}
-                      style={{
-                        transform: `rotate(${angle}deg) translateY(-140px) rotate(-${angle}deg)`,
-                      }}
-                    >
-                      <div className="seat-position">{pos}</div>
-                      <div className="seat-stack">{effectiveStack}bb</div>
-                      {isHero && <div className="seat-cards">🂠🂠</div>}
-                      {isRaiser && <div className="seat-action">开池</div>}
-                      {isThreeBettor && <div className="seat-action">3-bet</div>}
-                    </div>
-                  );
-                })}
-              </div>
+            <div className="panel-title">
+              牌局实况
+              <span className="panel-sub">{tableSize}-max</span>
             </div>
           </div>
 
-          {/* Scenario Controls */}
-          {renderScenarioControls()}
+          <div className="right-scroll">
+            {/* Table */}
+            <div className="table-scene">
+              <div className="poker-table">
+                <div className="table-felt" />
+                <div className="pot-area">
+                  <div className="pot-label">Pot</div>
+                  <div className="pot-value">{potBB}bb</div>
+                </div>
+                <div className="seats">
+                  {POSITIONS.slice(0, tableSize).map((pos, i) => {
+                    const isHero = pos === heroPosition;
+                    const isRaiser = pos === raiserPosition;
+                    const isThreeBettor = pos === threeBettor;
 
-          {/* Action History */}
-          <div className="action-history">
-            <h4>操作记录</h4>
-            {renderActionHistory()}
+                    let actionLabel: string | null = null;
+                    let actionClass = "";
+                    if (isThreeBettor) {
+                      actionLabel = "3-bet";
+                      actionClass = "act-3bet";
+                    } else if (isRaiser) {
+                      actionLabel = "Raise";
+                      actionClass = "act-raise";
+                    } else if (isHero) {
+                      actionLabel = "Hero";
+                      actionClass = "act-hero";
+                    }
+
+                    return (
+                      <div
+                        key={pos}
+                        className={[
+                          "seat",
+                          isHero ? "hero" : "",
+                          isRaiser ? "raiser" : "",
+                          isThreeBettor ? "three-bettor" : "",
+                        ].filter(Boolean).join(" ")}
+                        style={{ transform: getSeatTransform(i) }}
+                      >
+                        <div className="seat-position">{pos}</div>
+                        <div className="seat-stack">{effectiveStack}bb</div>
+                        {isHero && <div className="seat-cards">🂠 🂠</div>}
+                        {actionLabel && (
+                          <div className={`seat-action ${actionClass}`}>{actionLabel}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="dealer-button" style={getDealerButtonStyle()}>D</div>
+              </div>
+            </div>
+
+            {/* Scenario Controls */}
+            {renderScenarioControls()}
           </div>
         </section>
       </main>

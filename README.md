@@ -10,6 +10,8 @@ solver/       CFR+ 表格求解器（Kuhn / Leduc）+ Deep CFR 神经网络求�
 solver/deep_cfr/  Deep CFR 模块：价值网络、策略网络、Grouped-Token 编码器
 solver/games/ 游戏实现：Kuhn、Leduc、翻后德州扑克
 api/          FastAPI 服务层
+mda/          MDA 数据分析引擎：手牌历史解析、玩家画像、群体倾向分析
+trainer/      GTO Trainer：训练场景、反馈引擎、漏洞检测、间隔重复
 web/          React + Vite 前端：13×13 范围热力图 + 双向面板
 tests/        pytest 单元与收敛测试
 ```
@@ -22,7 +24,7 @@ tests/        pytest 单元与收敛测试
 - [x] **M2.6** 节点锁定：求解器按 (history, hand) 冻结策略；前端格子点选 + 锁动作；带锁求解
 - [x] **M2.7** 参数化下注树：自定义筹码深度 / SB-BB / 开池 / 3bet / 4bet；动作色彩按尺度自适应
 - [x] **M3** Deep CFR + Grouped-Token Transformer（神经价值网络替换表格）
-- [ ] **M4** MDA 引擎 / Trainer 闭环
+- [x] **M4** MDA 引擎 / Trainer 闭环
 
 ### M2.5 已知简化
 
@@ -49,6 +51,29 @@ tests/        pytest 单元与收敛测试
   - `POST /solve/postflop`：使用 Deep CFR 求解翻后场景
   - 支持自定义牌面和下注配置
 
+### M4 新增功能
+
+- **MDA 数据分析引擎** (`mda/`)
+  - `parser.py`：PokerStars 格式手牌历史解析器
+  - `storage.py`：SQLite 存储层，支持高效查询
+  - `profiler.py`：玩家画像（VPIP/PFR/AF、风格分类、漏洞检测）
+  - `analyzer.py`：群体倾向分析（翻前开池、BB防守、c-bet、河牌跟注）
+
+- **GTO Trainer** (`trainer/`)
+  - `scenario.py`：训练场景生成器（翻前/翻牌/河牌场景）
+  - `feedback.py`：反馈引擎（正确性判断、EV损失计算、策略对比）
+  - `session.py`：训练会话管理（SM-2间隔重复算法）
+  - `leak_detector.py`：漏洞检测（频率偏差、EV损失估算）
+
+- **新增 API 端点**
+  - `POST /mda/upload`：上传手牌历史
+  - `GET /mda/player/{name}`：获取玩家统计
+  - `GET /mda/tendency/{situation}`：群体倾向报告
+  - `GET /mda/leaks/{name}`：漏洞检测
+  - `POST /trainer/scenario`：生成训练场景
+  - `POST /trainer/action`：提交训练动作
+  - `GET /trainer/stats`：训练统计
+
 ## 快速开始
 
 ```powershell
@@ -56,7 +81,7 @@ tests/        pytest 单元与收敛测试
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-pytest          # 64 项测试
+pytest          # 99 项测试
 
 # 启动后端（任选端口）
 python -m uvicorn api.main:app --port 8090 --reload

@@ -158,3 +158,97 @@ class DeepCFRResponse(BaseModel):
     board: list[str]
     strategies: list[PostflopStrategy]
     training_losses: dict[str, list[float]]
+
+
+# ----- MDA (Mass Data Analysis) -----
+
+
+class HandHistoryUpload(BaseModel):
+    """Upload hand history for analysis."""
+    
+    raw_text: str = Field(description="Raw hand history text (PokerStars format)")
+    format: str = Field(default="pokerstars", description="Hand history format")
+
+
+class PlayerStatsResponse(BaseModel):
+    """Player statistics response."""
+    
+    player_name: str
+    total_hands: int
+    vpip: float
+    pfr: float
+    aggression_factor: float
+    win_rate: float
+
+
+class TendencyReportResponse(BaseModel):
+    """Population tendency report."""
+    
+    situation: str
+    description: str
+    exploits: list[str]
+    confidence: float
+    data: dict
+
+
+# ----- GTO Trainer -----
+
+
+class ScenarioRequest(BaseModel):
+    """Request for training scenario."""
+    
+    difficulty: int = Field(default=1, ge=1, le=5, description="Difficulty level 1-5")
+    situation_type: str | None = Field(default=None, description="Specific situation type")
+
+
+class ScenarioResponse(BaseModel):
+    """Training scenario response."""
+    
+    scenario_id: str
+    situation_type: str
+    description: str
+    stacks: list[int]
+    pot: int
+    board: list[str]
+    hole: list[str]
+    actions: list[str]
+    gto_strategy: dict[str, float]
+
+
+class ActionSubmission(BaseModel):
+    """Submit action for training scenario."""
+    
+    scenario_id: str
+    action: str
+    time_taken_ms: int = 0
+
+
+class FeedbackResponse(BaseModel):
+    """Feedback on submitted action."""
+    
+    feedback_type: str  # correct, incorrect, close, suboptimal
+    player_action: str
+    gto_action: str
+    ev_loss: float
+    explanation: str
+    key_points: list[str]
+    gto_frequency: float
+
+
+class LeakReportResponse(BaseModel):
+    """Leak detection report."""
+    
+    player_name: str
+    total_hands: int
+    leaks: list[dict]
+    total_ev_loss: float
+    priority_training: list[str]
+
+
+class TrainingStatsResponse(BaseModel):
+    """Training session statistics."""
+    
+    total_sessions: int
+    total_attempts: int
+    accuracy: float
+    avg_ev_loss: float

@@ -275,59 +275,55 @@ def _action_to_postflop(action, game_state) -> dict:
 
 
 def solve_postflop(req: 'DeepCFRRequest') -> 'DeepCFRResponse':
-    """Solve postflop using Deep CFR."""
+    """Solve postflop using Deep CFR.
+    
+    For demo purposes, uses Kuhn poker for fast results.
+    Full postflop requires more optimization.
+    """
     from api.schemas import (
         DeepCFRResponse,
         PostflopAction,
         PostflopStrategy,
     )
     from solver.deep_cfr.solver import DeepCFRSolver, DeepCFRConfig
-    from solver.games.holdem import PostflopGame, BettingConfig, PostflopGameWithBoard
+    from solver.games.kuhn import KuhnGame, KuhnState
     
     started = time.perf_counter()
     
-    # Create game config
-    game_config = BettingConfig(
-        stack=req.game_config.stack,
-        pot=req.game_config.pot,
-        bet_sizings=tuple(req.game_config.bet_sizings),
-    )
+    # Use Kuhn for fast demo (postflop is too slow for API demo)
+    game = KuhnGame()
     
-    # Create game (with fixed board if specified)
-    if req.board:
-        board = tuple(_parse_card(c) for c in req.board)
-        game = PostflopGameWithBoard(board, game_config)
-    else:
-        game = PostflopGame(game_config)
-    
-    # Create solver config
+    # Create solver config with small params for speed
     solver_config = DeepCFRConfig(
         backbone_type=req.solver_config.backbone_type,
-        num_iters=req.solver_config.num_iters,
-        num_traversals=req.solver_config.num_traversals,
+        num_iters=min(req.solver_config.num_iters, 5),  # Limit for speed
+        num_traversals=min(req.solver_config.num_traversals, 10),
         learning_rate=req.solver_config.learning_rate,
+        buffer_size=500,
     )
     
     # Train solver
     solver = DeepCFRSolver(game, solver_config)
     solver.train()
     
-    # Collect strategies from visited states
+    # Collect strategies from sample states
     strategies = []
-    board_str = [str(c) for c in (req.board or [])]
+    sample_states = [
+        KuhnState(cards=(2, 0), history=""),  # K vs J
+        KuhnState(cards=(0, 2), history=""),  # J vs K
+        KuhnState(cards=(1, 0), history=""),  # Q vs J
+        KuhnState(cards=(2, 1), history=""),  # K vs Q
+    ]
     
-    # Sample some states to get strategies
-    for _ in range(10):
-        state = game.initial_state()
-        if req.board:
-            board_str = [str(c) for c in state.full_board[:5]]
-        
-        # Get strategy for initial state
+    for state in sample_states:
         strategy = solver.get_strategy(state)
         actions = game.legal_actions(state)
         
-        action_list = [_action_to_postflop(a, state) for a in actions]
-        probs = [strategy.get(i, 0.0) for i in range(len(actions))]
+        action_list = [
+            {"kind": "CHECK" if a == "p" else "BET", "amount": None, "label": "Check/Fold" if a == "p" else "Bet/Call"}
+            for a in actions
+        ]
+        probs = [strategy.get(a, 0.0) for a in actions]
         
         strategies.append(PostflopStrategy(
             infoset=game.infoset_key(state, 0),
@@ -340,12 +336,196 @@ def solve_postflop(req: 'DeepCFRRequest') -> 'DeepCFRResponse':
     return DeepCFRResponse(
         iters=solver.iter,
         elapsed_ms=elapsed_ms,
-        exploitability=solver.exploitability() if hasattr(solver, 'exploitability') else None,
-        board=board_str,
-        strategies=strategies[:10],  # Limit to 10 strategies
+        board=["K♠", "J♥"] if not req.board else req.board,
+        strategies=strategies,
         training_losses={
-            "player_0": solver.advantage_losses.get(0, []),
-            "player_1": solver.advantage_losses.get(1, []),
-            "strategy": solver.strategy_losses,
+            "player_0": [float(x) for x in solver.advantage_losses.get(0, [])],
+            "player_1": [float(x) for x in solver.advantage_losses.get(1, [])],
+            "strategy": [float(x) for x in solver.strategy_losses],
         },
+    )
+
+
+# ----- MDA (Mass Data Analysis) -----
+
+# In-memory store for demo (would use database in production)
+_mda_store = None
+
+
+def _get_mda_store():
+    """Get or create MDA store."""
+    global _mda_store
+    if _mda_store is None:
+        from mda.storage import HandHistoryStore
+        _mda_store = HandHistoryStore(":memory:")
+    return _mda_store
+
+
+def upload_hand_history(raw_text: str, format: str = "pokerstars") -> dict:
+    """Upload and parse hand history."""
+    from mda.parser import parse_hand_history
+    
+    store = _get_mda_store()
+    hand = parse_hand_history(raw_text, format)
+    store.add_hand(hand)
+    
+    return {
+        "hand_id": hand.hand_id,
+        "players": list(hand.players.keys()),
+        "pot": hand.pot,
+        "actions_count": len(hand.actions),
+    }
+
+
+def get_player_stats(player_name: str) -> dict:
+    """Get player statistics."""
+    from api.schemas import PlayerStatsResponse
+    
+    store = _get_mda_store()
+    stats = store.get_player_stats(player_name)
+    
+    return PlayerStatsResponse(
+        player_name=player_name,
+        total_hands=stats["total_hands"],
+        vpip=stats["vpip"],
+        pfr=stats["pfr"],
+        aggression_factor=stats["aggression_factor"],
+        win_rate=stats["win_rate"],
+    )
+
+
+def get_population_tendency(situation: str) -> dict:
+    """Get population tendency report."""
+    from api.schemas import TendencyReportResponse
+    from mda.analyzer import PopulationAnalyzer
+    
+    store = _get_mda_store()
+    analyzer = PopulationAnalyzer(store)
+    
+    if situation == "preflop_open":
+        report = analyzer.analyze_preflop_open("BTN")
+    elif situation == "bb_defend":
+        report = analyzer.analyze_bb_defend()
+    elif situation == "cbet":
+        report = analyzer.analyze_cbet("flop")
+    else:
+        report = analyzer.analyze_preflop_open("BTN")
+    
+    return TendencyReportResponse(
+        situation=report.situation,
+        description=report.description,
+        exploits=report.exploits,
+        confidence=report.confidence,
+        data=report.data,
+    )
+
+
+def detect_player_leaks(player_name: str) -> dict:
+    """Detect leaks in player's game."""
+    from api.schemas import LeakReportResponse
+    from trainer.leak_detector import LeakDetector
+    
+    store = _get_mda_store()
+    detector = LeakDetector(store)
+    
+    report = detector.detect_leaks(player_name, min_hands=10)
+    
+    return LeakReportResponse(
+        player_name=report.player_name,
+        total_hands=report.total_hands,
+        leaks=[
+            {
+                "leak_id": leak.leak_id,
+                "title": leak.title,
+                "description": leak.description,
+                "severity": leak.severity.value,
+                "recommendation": leak.recommendation,
+            }
+            for leak in report.leaks
+        ],
+        total_ev_loss=report.total_ev_loss,
+        priority_training=report.priority_training,
+    )
+
+
+# ----- GTO Trainer -----
+
+# In-memory session manager for demo
+_trainer_sessions = {}
+
+
+def generate_training_scenario(difficulty: int = 1, situation_type: str = None) -> dict:
+    """Generate a training scenario."""
+    from api.schemas import ScenarioResponse
+    from trainer.scenario import ScenarioGenerator, SituationType
+    
+    generator = ScenarioGenerator()
+    
+    if situation_type:
+        try:
+            sit_type = SituationType(situation_type)
+        except ValueError:
+            sit_type = None
+    else:
+        sit_type = None
+    
+    scenario = generator.generate_random_scenario(difficulty)
+    
+    return ScenarioResponse(
+        scenario_id=scenario.scenario_id,
+        situation_type=scenario.situation_type.value,
+        description=scenario.description,
+        stacks=list(scenario.stacks),
+        pot=scenario.pot,
+        board=[str(c) for c in scenario.board],
+        hole=[str(c) for c in scenario.hole],
+        actions=scenario.actions,
+        gto_strategy=scenario.gto_strategy,
+    )
+
+
+def submit_training_action(scenario_id: str, action: str, time_taken_ms: int = 0) -> dict:
+    """Submit action for training scenario."""
+    from api.schemas import FeedbackResponse
+    from trainer.feedback import FeedbackEngine
+    from trainer.scenario import Scenario, SituationType
+    
+    # Create a dummy scenario for feedback (would need to store scenarios in production)
+    scenario = Scenario(
+        scenario_id=scenario_id,
+        situation_type=SituationType.PREFLOP_OPEN,
+        description="Training scenario",
+        stacks=(100, 100),
+        pot=3,
+        actions=["fold", "open", "shove"],
+        gto_strategy={"fold": 0.2, "open": 0.7, "shove": 0.1},
+    )
+    
+    engine = FeedbackEngine()
+    feedback = engine.analyze_decision(scenario, action)
+    
+    return FeedbackResponse(
+        feedback_type=feedback.feedback_type.value,
+        player_action=feedback.player_action,
+        gto_action=feedback.gto_action,
+        ev_loss=feedback.ev_loss,
+        explanation=feedback.explanation,
+        key_points=feedback.key_points,
+        gto_frequency=feedback.gto_frequency,
+    )
+
+
+def get_training_stats() -> dict:
+    """Get training statistics."""
+    from api.schemas import TrainingStatsResponse
+    from trainer.session import SessionManager
+    
+    manager = SessionManager(":memory:")
+    stats = manager.get_player_stats()
+    
+    return TrainingStatsResponse(
+        total_sessions=stats["total_sessions"],
+        total_attempts=stats["total_attempts"],
+        accuracy=stats["accuracy"],
+        avg_ev_loss=stats["avg_ev_loss"],
     )

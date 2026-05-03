@@ -705,44 +705,77 @@ def get_preflop_strategy_matrix(
         )
     
     elif scenario_type == "face_open":
-        # Facing an open raise — uses position-aware defense range
-        villain_pos = pos_map.get(raiser_position.upper()) if raiser_position else Position.BTN
-        defense = get_defense_range(hero_pos, villain_pos, effective_stack)
-
-        for cls in classes:
-            label = cls.label
-            call_p = defense.call_hands.get(label, 0.0)
-            raise_p = defense.raise_hands.get(label, 0.0)
-            total = call_p + raise_p
-            if total > 1.0:
-                # Renormalize defensively (shouldn't trigger; ranges already capped)
-                call_p /= total
-                raise_p /= total
-                total = 1.0
-            fold_freq = max(0.0, 1.0 - total)
-
-            actions = ["fold", "call", "3bet"]
-            probs = [fold_freq, call_p, raise_p]
-            strategies[label] = HandStrategy(
-                hand=label,
-                actions=actions,
-                probs=probs,
-                action_kinds=get_action_kinds(actions),
+        # Facing an open raise — uses HU solver with opponent range estimation
+        villain_pos = raiser_position if raiser_position else "BTN"
+        
+        # Use the new defense module for BB/SB
+        if hero_position.upper() in ["BB", "SB"]:
+            from strategy.defense import get_defense_strategy_for_scenario
+            defense_result = get_defense_strategy_for_scenario(
+                hero_position=hero_position.upper(),
+                villain_position=villain_pos.upper(),
+                stack_depth=effective_stack,
+                open_size=raise_size,
             )
-
-        call_freq = _combo_weighted(1)
-        raise_freq = _combo_weighted(2)
-        vpip = call_freq + raise_freq
-
-        return PreflopStrategyResponse(
-            scenario_description=f"{hero_position} vs {raiser_position} open ({raise_size}bb)",
-            hero_position=hero_position,
-            scenario_type=scenario_type,
-            strategies=strategies,
-            vpip=vpip,
-            raise_freq=raise_freq,
-            call_freq=call_freq,
-        )
+            
+            # Convert to HandStrategy objects
+            for label, strat_dict in defense_result["strategies"].items():
+                strategies[label] = HandStrategy(
+                    hand=label,
+                    actions=strat_dict["actions"],
+                    probs=strat_dict["probs"],
+                    action_kinds=strat_dict["action_kinds"],
+                )
+            
+            call_freq = defense_result["call_freq"]
+            raise_freq = defense_result["three_bet_freq"]
+            vpip = defense_result["defense_freq"]
+            
+            return PreflopStrategyResponse(
+                scenario_description=f"{hero_position} vs {villain_pos} open ({raise_size}bb) - GTO求解",
+                hero_position=hero_position,
+                scenario_type=scenario_type,
+                strategies=strategies,
+                vpip=vpip,
+                raise_freq=raise_freq,
+                call_freq=call_freq,
+            )
+        else:
+            # For other positions, use heuristic ranges
+            villain_pos_obj = pos_map.get(villain_pos.upper(), Position.BTN)
+            three_bet_range = get_3bet_range(hero_pos, villain_pos_obj, effective_stack)
+            
+            for cls in classes:
+                label = cls.label
+                value_freq = three_bet_range.value_hands.get(label, 0.0)
+                bluff_freq = three_bet_range.bluff_hands.get(label, 0.0)
+                call_freq_hand = three_bet_range.call_hands.get(label, 0.0)
+                
+                total = value_freq + bluff_freq + call_freq_hand
+                fold_freq = max(0, 1.0 - total)
+                
+                actions = ["fold", "call", "3bet"]
+                probs = [fold_freq, call_freq_hand, value_freq + bluff_freq]
+                strategies[label] = HandStrategy(
+                    hand=label,
+                    actions=actions,
+                    probs=probs,
+                    action_kinds=get_action_kinds(actions),
+                )
+            
+            call_freq = _combo_weighted(1)
+            raise_freq = _combo_weighted(2)
+            vpip = call_freq + raise_freq
+            
+            return PreflopStrategyResponse(
+                scenario_description=f"{hero_position} vs {villain_pos} open ({raise_size}bb)",
+                hero_position=hero_position,
+                scenario_type=scenario_type,
+                strategies=strategies,
+                vpip=vpip,
+                raise_freq=raise_freq,
+                call_freq=call_freq,
+            )
     
     elif scenario_type == "face_3bet":
         # Facing a 3-bet — hero opened, threeBettor 3-bet

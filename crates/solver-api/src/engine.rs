@@ -33,7 +33,8 @@ impl Default for EngineOptions {
     fn default() -> EngineOptions {
         EngineOptions {
             target: 0.003,
-            time_limit: Duration::from_secs(120),
+            // 两人桌开池跟注的翻牌范围最宽，云端 4 核要 290 秒，20 线程估计 60 到 80 秒。
+            time_limit: Duration::from_secs(180),
             max_iterations: 2000,
         }
     }

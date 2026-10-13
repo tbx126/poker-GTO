@@ -20,4 +20,5 @@ cargo test
 cargo run --release --example convergence   # 查看收敛过程
 cargo run --release -p preflop --example size              # 2 到 6 人下注树规模
 cargo run --release -p preflop --example converge -- 3 640 # 3 人翻前求解收敛过程
+cargo run --release -p preflop --bin solve -- 6          # 求解并导出 6 人范围表到 data/preflop/
 ```

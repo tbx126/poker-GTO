@@ -126,3 +126,32 @@ fn three_handed_improves_with_iterations() {
     let late = evaluate(&tree, &model, &late).max_gain_per_100();
     assert!(late < early / 2.0, "10 轮 {early}，200 轮 {late}");
 }
+
+#[test]
+fn saved_strategy_round_trips() {
+    use preflop::{load, save, Meta};
+    let (tree, _, strategy) = solve(3, 30);
+    let meta = Meta {
+        iterations: 30,
+        max_gain_per_100: 1.5,
+    };
+    let mut bytes = Vec::new();
+    save(&mut bytes, &tree, &strategy, &meta).unwrap();
+    let (config, loaded, meta) = load(bytes.as_slice()).unwrap();
+    assert_eq!(config.players, 3);
+    assert_eq!(config.open, 2.5);
+    assert_eq!(meta.iterations, 30);
+    assert_eq!(loaded.len(), strategy.len());
+    // 量化误差小于一个刻度，每行概率之和仍为 1。
+    for (a, b) in loaded.iter().zip(&strategy) {
+        assert!((a - b).abs() < 1.0 / 255.0);
+    }
+    let Node::Decision {
+        offset, actions, ..
+    } = &tree.nodes[tree.root()]
+    else {
+        panic!()
+    };
+    let row: f64 = loaded[*offset..offset + actions.len()].iter().sum();
+    assert!((row - 1.0).abs() < 1e-9);
+}

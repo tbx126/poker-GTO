@@ -77,3 +77,21 @@ pub struct ActionAdvice {
     /// 相对“现在弃牌”的期望收益（bb），弃牌为 0。
     pub ev: f32,
 }
+
+/// 前端算出的一个合法动作，规则近似只评估这些动作。
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegalMove {
+    pub kind: MoveKind,
+    /// 动作之后这条街的总投入（bb）。
+    pub to: f32,
+}
+
+/// 多人底池的规则近似策略，不是求解结果，界面上要标“近似”。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApproxStrategy {
+    pub actions: Vec<ActionAdvice>,
+    /// 主角对各对手（按动作收窄后的）范围摊牌的胜率。
+    pub equity: f32,
+}

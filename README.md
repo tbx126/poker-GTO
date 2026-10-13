@@ -11,7 +11,8 @@
 - [x] 翻前求解器 CPU 版（2 到 6 人，`crates/preflop`）
 - [ ] 翻前求解器加速与范围表导出
 - [ ] 翻后两人底池求解器（基于 postflop-solver）
-- [ ] 规则引擎、牌桌界面、即时纠错、复盘
+- [x] 界面：规则引擎、牌桌、即时纠错、复盘、翻前范围查看与导入（`app/`，翻后暂用规则近似）
+- [ ] Tauri 外壳，把翻后求解器接进界面
 
 ## 开发
 
@@ -22,3 +23,19 @@ cargo run --release -p preflop --example size              # 2 到 6 人下注�
 cargo run --release -p preflop --example converge -- 3 640 # 3 人翻前求解收敛过程
 cargo run --release -p preflop --bin solve -- 6          # 求解并导出 6 人范围表到 data/preflop/
 ```
+
+## 界面
+
+`app/` 是 React + TypeScript 前端，之后由 Tauri 打包成桌面应用。
+
+```sh
+cd app
+npm install
+npm run dev      # 本地预览
+npm test         # 规则引擎和纠错的单元测试
+npm run build    # 打包到 app/dist
+```
+
+- `src/engine/`：牌型评估、蒙特卡洛胜率、2 到 6 人现金局规则引擎。翻前动作和尺寸与 `crates/preflop` 的下注树一致，测试会逐个核对范围表里的局面。
+- `src/gto/`：策略来源。翻前查范围表，翻后通过 `setPostflopSolver` 接入求解器，没接入时用规则近似并在界面上标注“近似”。
+- `app/public/ranges/` 是求解器导出的范围表。重新求解后，把 `data/preflop/<人数>max.json` 复制过来即可。

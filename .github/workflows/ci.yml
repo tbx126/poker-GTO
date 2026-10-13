@@ -35,44 +35,11 @@ jobs:
       - run: npm test
       - run: npm run build
 
-  # 生成 2 到 6 人的翻前范围表（6 人约 20 分钟），按求解器源码缓存，没改动时直接复用。
-  preflop-tables:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - id: cache
-        uses: actions/cache@v4
-        with:
-          path: data/preflop
-          key: preflop-tables-${{ hashFiles('crates/cfr/**', 'crates/holdem/**', 'crates/preflop/**', 'data/equity_hu_169.bin', 'Cargo.lock') }}
-      - uses: dtolnay/rust-toolchain@stable
-        if: steps.cache.outputs.cache-hit != 'true'
-      - uses: Swatinem/rust-cache@v2
-        if: steps.cache.outputs.cache-hit != 'true'
-      - if: steps.cache.outputs.cache-hit != 'true'
-        run: for n in 2 3 4 5 6; do cargo run --release -p preflop --bin solve -- $n 0.5 600; done
-      - uses: actions/upload-artifact@v4
-        with:
-          name: preflop-tables
-          path: data/preflop/
-          if-no-files-found: error
-
   # 在 Windows 上编译桌面应用并打出安装包，可以在这次运行的 Artifacts 里下载。
   desktop:
     runs-on: windows-latest
-    needs: preflop-tables
     steps:
       - uses: actions/checkout@v4
-      # 安装包带上完整的翻前策略（求解器用），界面用的范围表也换成同一次求解的结果。
-      - uses: actions/download-artifact@v4
-        with:
-          name: preflop-tables
-          path: preflop-tables
-      - shell: bash
-        run: |
-          cp preflop-tables/*.bin app/src-tauri/resources/preflop/
-          cp preflop-tables/*.json app/public/ranges/
       - uses: actions/setup-node@v4
         with:
           node-version: 22

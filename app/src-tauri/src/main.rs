@@ -44,7 +44,8 @@ fn solver_cancel(engine: State<'_, Engine>, hand_id: String) {
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
-            let dir = app.path().resource_dir()?.join("resources").join("preflop");
+            // 安装包里带着仓库 data/preflop/ 下的完整翻前策略。
+            let dir = app.path().resource_dir()?.join("preflop");
             app.manage(Engine::new(&dir, EngineOptions::default()));
             Ok(())
         })

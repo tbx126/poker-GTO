@@ -44,8 +44,8 @@
         ]
       }
     },
-    "resources": [
-      "resources/preflop/*"
-    ]
+    "resources": {
+      "../../data/preflop/*.bin": "preflop/"
+    }
   }
 }

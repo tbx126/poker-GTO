@@ -236,7 +236,8 @@ function postflopMoves(s: GameState, p: number): Move[] {
     if (blocked) return moves;
     let largest = 0;
     for (const f of POSTFLOP_SIZES[s.street]) {
-      const to = round(potNow * f);
+      // 按整数“分”计算，和求解器的整数筹码一致。
+      const to = Math.round(Math.round(potNow * 100) * f) / 100;
       if (to >= max || forced(to)) {
         largest = max;
         break;

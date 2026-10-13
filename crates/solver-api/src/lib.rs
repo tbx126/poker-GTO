@@ -6,9 +6,13 @@
 //!
 //! 只支持从翻牌开始就是两人的底池，多人底池由前端用规则近似。
 
+mod approx;
 mod engine;
 pub mod line;
 mod types;
 
 pub use engine::{Engine, EngineOptions};
-pub use types::{ActionAdvice, HandState, MoveKind, PostflopMove, Progress, SolverStrategy};
+pub use types::{
+    ActionAdvice, ApproxStrategy, HandState, LegalMove, MoveKind, PostflopMove, Progress,
+    SolverStrategy,
+};

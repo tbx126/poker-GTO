@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { shuffledDeck } from "../engine/cards";
 import { GameState, Move, apply, defaultConfig, legalMoves, newHand, pot, toAct } from "../engine/game";
-import { Feedback, judge, sample, strategyFor } from "../gto/coach";
+import { Feedback, judge, postflopSolver, sample, strategyFor } from "../gto/coach";
 import { IndexedTable, loadTable } from "../gto/preflop";
+import { SolverProgress, inDesktop, onSolverProgress } from "../gto/tauri";
 import type { Strategy } from "../gto/types";
 import type { HandRecord, Settings } from "../store/history";
 import { ActionBar } from "./ActionBar";
@@ -22,10 +23,11 @@ const THINK_MS: Record<Settings["speed"], number> = { slow: 1100, normal: 650, f
 
 function deal(players: number, heroSeat: number): Hand {
   const deck = shuffledDeck();
+  const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   return {
-    id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+    id,
     heroSeat,
-    state: newHand(defaultConfig(players), deck),
+    state: newHand(defaultConfig(players), deck, id),
     moves: [],
     feedback: {},
   };
@@ -43,7 +45,20 @@ export function Play({ settings, onHandDone }: Props) {
   const [table, setTable] = useState<IndexedTable | null | undefined>(undefined);
   const [hint, setHint] = useState<Strategy | null>(null);
   const [thinking, setThinking] = useState<{ seat: number; ms: number } | null>(null);
-  const saved = useRef(new Set<string>());
+  const [progress, setProgress] = useState<SolverProgress | null>(null);
+  const handId = useRef(hand.id);
+  handId.current = hand.id;
+
+  // 求解进度只显示当前这手牌的。
+  useEffect(() => {
+    if (!inDesktop) return;
+    return onSolverProgress((p) => {
+      if (p.handId === handId.current) setProgress(p);
+    });
+  }, []);
+
+  // 离开牌桌时释放后台求解。
+  useEffect(() => () => postflopSolver()?.cancel(handId.current), []);
 
   useEffect(() => {
     let live = true;
@@ -62,6 +77,27 @@ export function Play({ settings, onHandDone }: Props) {
   const s = hand.state;
   const actor = toAct(s);
   const heroTurn = actor === hand.heroSeat;
+  const boardSize = s.board.length;
+
+  // 一发出新的公共牌就在后台开始求解（只有两人底池），同时显示进度。
+  useEffect(() => {
+    setProgress(null);
+    const solver = postflopSolver();
+    if (!solver || boardSize < 3 || s.result) return;
+    let live = true;
+    solver.supports(s).then(
+      (ok) => {
+        if (!live || !ok) return;
+        setProgress({ handId: s.id, street: s.street, iteration: 0, exploitability: 1, fraction: 0, done: false });
+        solver.prepare(s);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+    // 只在公共牌变化时触发。
+  }, [hand.id, boardSize]);
 
   // 对手按 GTO 策略随机出牌。
   useEffect(() => {
@@ -97,23 +133,26 @@ export function Play({ settings, onHandDone }: Props) {
   }, [s, heroTurn, hand.heroSeat, table]);
 
   const onMove = useCallback(
-    async (m: Move) => {
+    (m: Move) => {
       if (toAct(s) !== hand.heroSeat) return;
-      const strategy = hint ?? (await strategyFor(s, hand.heroSeat, table ?? null));
-      const fb = judge(s, strategy, m, pot(s));
-      setHand((h) =>
-        h.state === s
-          ? { ...h, state: apply(s, m), moves: [...h.moves, m], feedback: { ...h.feedback, [s.events.length]: fb } }
-          : h,
-      );
+      const index = s.events.length;
+      const id = hand.id;
+      const before = s;
+      setHand((h) => (h.state === s ? { ...h, state: apply(s, m), moves: [...h.moves, m] } : h));
+      // 先出牌，纠错随后补上（翻后求解可能还没算完）。
+      const record = (st: Strategy) =>
+        setHand((h) =>
+          h.id === id ? { ...h, feedback: { ...h.feedback, [index]: judge(before, st, m, pot(before)) } } : h,
+        );
+      if (hint) record(hint);
+      else strategyFor(before, hand.heroSeat, table ?? null).then(record);
     },
-    [s, hand.heroSeat, hint, table],
+    [s, hand.heroSeat, hand.id, hint, table],
   );
 
-  // 一手结束后存进历史。
+  // 一手结束后存进历史；之后补上的纠错会覆盖同一条记录。
   useEffect(() => {
-    if (!s.result || saved.current.has(hand.id)) return;
-    saved.current.add(hand.id);
+    if (!s.result) return;
     onHandDone({
       id: hand.id,
       at: Date.now(),
@@ -128,7 +167,10 @@ export function Play({ settings, onHandDone }: Props) {
 
   const next = useCallback(() => {
     // 按钮每手顺时针移动一位，玩家的位置从大盲到小盲、按钮……依次轮转。
-    setHand((h) => deal(n, (h.heroSeat - 1 + n) % n));
+    setHand((h) => {
+      postflopSolver()?.cancel(h.id);
+      return deal(n, (h.heroSeat - 1 + n) % n);
+    });
   }, [n]);
 
   useEffect(() => {
@@ -144,6 +186,7 @@ export function Play({ settings, onHandDone }: Props) {
   }, [s.result, next]);
 
   const heroNet = s.result?.net[hand.heroSeat];
+  const solving = progress !== null && !progress.done && progress.street === s.street && !s.result;
 
   return (
     <div className="play">
@@ -169,7 +212,11 @@ export function Play({ settings, onHandDone }: Props) {
         ) : (
           <div className="actionbar">
             <span className="waiting">
-              {table === undefined ? "读取范围表" : `${s.seats[actor ?? 0].pos} 思考中`}
+              {table === undefined
+                ? "读取范围表"
+                : solving
+                  ? `${s.seats[actor ?? 0].pos} 等求解器 ${Math.round(progress!.fraction * 100)}%`
+                  : `${s.seats[actor ?? 0].pos} 思考中`}
               <span className="dots">
                 <i />
                 <i />
@@ -185,6 +232,7 @@ export function Play({ settings, onHandDone }: Props) {
         coach={settings.coach}
         feedback={hand.feedback}
         hint={settings.hints && heroTurn ? hint : null}
+        progress={solving ? progress : null}
       />
     </div>
   );

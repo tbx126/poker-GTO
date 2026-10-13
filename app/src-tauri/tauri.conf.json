@@ -43,6 +43,9 @@
           "SimpChinese"
         ]
       }
-    }
+    },
+    "resources": [
+      "resources/preflop/*"
+    ]
   }
 }

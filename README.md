@@ -14,7 +14,7 @@
 - [x] 界面：规则引擎、牌桌、即时纠错、复盘、翻前范围查看与导入（`app/`，翻后暂用规则近似）
 - [x] 求解器接口（`crates/solver-api`）：翻后两人底池后台求解、进度、每个动作的 EV，给 Tauri 外壳调用
 - [x] Tauri 桌面外壳，GitHub Actions 打 Windows 安装包
-- [ ] 把翻后求解器接进界面
+- [x] 把翻后求解器接进界面：两人底池一发牌就后台求解，显示进度，纠错用求解器的频率和 EV
 
 ## 开发
 
@@ -44,6 +44,10 @@ npm run tauri build  # 打 Windows 安装包，输出在 src-tauri/target/releas
 ```
 
 每个 PR 的 CI 都会在 Windows 上打一次安装包，在那次运行的 Artifacts 里下载 `windows-installer`。
+
+桌面应用的翻后两人底池由 `crates/solver-api` 实时求解，需要完整的翻前策略 `app/src-tauri/resources/preflop/<人数>max.bin`。
+CI 会自动生成并打进安装包；本地开发时运行 `cargo run --release -p preflop --bin solve -- <人数>`，再把 `data/preflop/<人数>max.bin` 复制过去。
+缺少这些文件时，翻后会退回规则近似。
 
 - `src/engine/`：牌型评估、蒙特卡洛胜率、2 到 6 人现金局规则引擎。翻前动作和尺寸与 `crates/preflop` 的下注树一致，测试会逐个核对范围表里的局面。
 - `src/gto/`：策略来源。翻前查范围表，翻后通过 `setPostflopSolver` 接入求解器，没接入时用规则近似并在界面上标注“近似”。

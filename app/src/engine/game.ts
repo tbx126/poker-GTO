@@ -105,6 +105,8 @@ export interface Result {
 }
 
 export interface GameState {
+  /** 这手牌的编号，求解器用它缓存结果。 */
+  id: string;
   config: Config;
   deck: Card[];
   seats: Seat[];
@@ -128,7 +130,7 @@ export const toAct = (s: GameState): number | null => (s.result ? null : (s.pend
 const round = (x: number) => Math.round(x * 100) / 100;
 
 /** 按牌堆顺序发牌：先每人两张，再依次是翻牌、转牌、河牌。 */
-export function newHand(config: Config, deck: Card[]): GameState {
+export function newHand(config: Config, deck: Card[], id = ""): GameState {
   const n = config.players;
   const seats: Seat[] = Array.from({ length: n }, (_, i) => ({
     pos: positionName(n, i),
@@ -147,6 +149,7 @@ export function newHand(config: Config, deck: Card[]): GameState {
   post(n - 2, config.smallBlind);
   post(n - 1, config.bigBlind);
   return {
+    id,
     config,
     deck,
     seats,
@@ -391,8 +394,8 @@ export function preflopHistory(s: GameState): string[] {
 }
 
 /** 从牌堆和动作序列重放整手牌，返回每一步之后的状态（第一个是发牌后的状态）。 */
-export function replay(config: Config, deck: Card[], moves: Move[]): GameState[] {
-  const states = [newHand(config, deck)];
+export function replay(config: Config, deck: Card[], moves: Move[], id = ""): GameState[] {
+  const states = [newHand(config, deck, id)];
   for (const m of moves) states.push(apply(states[states.length - 1], m));
   return states;
 }

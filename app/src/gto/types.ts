@@ -21,6 +21,8 @@ export interface Strategy {
   equity?: number;
   /** 求解器给出的可剥削度（占底池的比例）。 */
   exploitability?: number;
+  /** 求解器是否收敛到目标精度；false 表示到了时间或轮数上限就停了。 */
+  converged?: boolean;
 }
 
 export const SOURCE_LABELS: Record<Strategy["source"], string> = {

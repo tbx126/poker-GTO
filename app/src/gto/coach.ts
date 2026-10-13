@@ -56,7 +56,12 @@ export interface SolverAction {
  * 下注、加注、全下按金额最接近的一个，避免两边金额取整不同时对不上。
  * 对应不上的合法动作不列出。
  */
-export function mapSolverActions(s: GameState, actions: SolverAction[], exploitability?: number): Strategy {
+export function mapSolverActions(
+  s: GameState,
+  actions: SolverAction[],
+  exploitability?: number,
+  converged?: boolean,
+): Strategy {
   const legal = legalMoves(s);
   const aggressive = legal.filter((m) => m.kind === "bet" || m.kind === "raise" || m.kind === "allin");
   const merged = new Map<Move, ActionAdvice>();
@@ -81,7 +86,7 @@ export function mapSolverActions(s: GameState, actions: SolverAction[], exploita
     a.freq /= total;
     a.ev = Math.round(a.ev! * 100) / 100;
   }
-  return { source: "solver", actions: list, exploitability };
+  return { source: "solver", actions: list, exploitability, converged };
 }
 
 /** 按策略频率随机选一个动作，GTO 对手用它出牌。 */

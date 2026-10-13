@@ -88,7 +88,7 @@ export function Play({ settings, onHandDone }: Props) {
     solver.supports(s).then(
       (ok) => {
         if (!live || !ok) return;
-        setProgress({ handId: s.id, street: s.street, iteration: 0, exploitability: 1, fraction: 0, done: false });
+        setProgress({ handId: s.id, street: s.street, iteration: 0, exploitability: 1, fraction: 0, done: false, converged: false });
         solver.prepare(s);
       },
       () => {},

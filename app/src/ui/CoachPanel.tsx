@@ -84,7 +84,13 @@ function SolverBar({ p }: { p: SolverProgress }) {
 }
 
 function Source({ s }: { s: Strategy }) {
-  return <span className={`source ${s.source}`}>{SOURCE_LABELS[s.source]}</span>;
+  const rough = s.source === "solver" && s.converged === false;
+  return (
+    <span className={`source ${rough ? "approx" : s.source}`}>
+      {SOURCE_LABELS[s.source]}
+      {rough && "（未收敛）"}
+    </span>
+  );
 }
 
 export function Verdict({ f, title = "上一个决策" }: { f: Feedback; title?: string }) {
@@ -122,7 +128,8 @@ export function Verdict({ f, title = "上一个决策" }: { f: Feedback; title?:
       )}
       {f.strategy.source === "solver" && f.strategy.exploitability !== undefined && (
         <p className="coach-note">
-          两人底池实时求解，可剥削度 {(f.strategy.exploitability * 100).toFixed(2)}% 底池。EV 相对于现在弃牌。
+          两人底池实时求解，可剥削度 {(f.strategy.exploitability * 100).toFixed(2)}% 底池
+          {f.strategy.converged === false && "（到了时间上限，没达到 0.3% 的目标，结果是近似的）"}。EV 相对于现在弃牌。
         </p>
       )}
       {f.strategy.source === "table" && f.evLoss === undefined && (

@@ -17,6 +17,8 @@ export interface SolverProgress {
   /** 0 到 1。 */
   fraction: number;
   done: boolean;
+  /** 到达目标精度（false 表示到了时间或轮数上限）。 */
+  converged: boolean;
 }
 
 /** 把规则引擎的状态转换成 crates/solver-api 的 HandState。 */
@@ -39,11 +41,11 @@ export const tauriSolver: PostflopSolver = {
     invoke("solver_prepare", { state: handState(s) }).catch((e) => console.warn("无法开始求解：", e));
   },
   async solve(s, seat) {
-    const r = await invoke<{ actions: SolverAction[]; exploitability: number }>("solver_strategy", {
+    const r = await invoke<{ actions: SolverAction[]; exploitability: number; converged: boolean }>("solver_strategy", {
       state: handState(s),
       seat,
     });
-    return mapSolverActions(s, r.actions, r.exploitability);
+    return mapSolverActions(s, r.actions, r.exploitability, r.converged);
   },
   cancel(handId) {
     invoke("solver_cancel", { handId }).catch(() => {});

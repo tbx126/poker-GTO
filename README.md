@@ -7,6 +7,7 @@
 ## 当前进度
 
 - [x] CFR+ 求解器核心与可剥削度计算，用库恩扑克和 Leduc 验证（`crates/cfr`）
+- [x] 七张牌型评估器、169 种起手牌、两人全下胜率表（`crates/holdem`，`data/equity_hu_169.bin`）
 - [ ] 翻前求解器（2 到 6 人，GPU 加速，附 CPU 参考实现）
 - [ ] 翻后两人底池求解器（基于 postflop-solver）
 - [ ] 规则引擎、牌桌界面、即时纠错、复盘

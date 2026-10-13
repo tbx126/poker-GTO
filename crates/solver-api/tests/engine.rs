@@ -79,6 +79,8 @@ fn heads_up_four_bet_pot_across_streets() {
         .windows(2)
         .all(|w| w[0].fraction <= w[1].fraction + 1e-6));
     assert!(bb.exploitability < 0.01);
+    assert!(bb.converged);
+    assert!(progress.last().unwrap().converged);
     check_strategy(&bb.actions);
     assert_eq!(bb.actions[0].kind, MoveKind::Check);
 

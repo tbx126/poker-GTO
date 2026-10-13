@@ -9,8 +9,8 @@
 - [x] CFR+ 求解器核心与可剥削度计算，用库恩扑克和 Leduc 验证（`crates/cfr`）
 - [x] 七张牌型评估器、169 种起手牌、两人全下胜率表（`crates/holdem`，`data/equity_hu_169.bin`）
 - [x] 翻前求解器 CPU 版（2 到 6 人，`crates/preflop`）
-- [ ] 翻前求解器加速与范围表导出
-- [ ] 翻后两人底池求解器（基于 postflop-solver）
+- [x] 翻前求解器加速与范围表导出
+- [x] 翻后两人底池求解器（`crates/postflop`，源码复制自 postflop-solver，见 `crates/postflop-solver`）
 - [x] 界面：规则引擎、牌桌、即时纠错、复盘、翻前范围查看与导入（`app/`，翻后暂用规则近似）
 - [ ] Tauri 外壳，把翻后求解器接进界面
 
@@ -23,6 +23,7 @@ cargo run --release -p preflop --example size              # 2 到 6 人下注�
 cargo run --release -p preflop --example converge -- 3 640 # 3 人翻前求解收敛过程
 cargo run --release -p preflop --bin solve -- 6          # 求解并导出 6 人范围表（含各动作 EV）到 data/preflop/
 cargo run --release -p preflop --bin export -- 6         # 不重新求解，只从已保存的 6 人范围表重新导出 JSON
+cargo run --release -p postflop --example bench -- 6 Td9d6h srp  # 6 人桌 BTN 开池 BB 跟注的翻牌求解计时
 ```
 
 ## 界面

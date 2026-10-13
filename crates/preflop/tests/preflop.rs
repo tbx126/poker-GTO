@@ -1,5 +1,5 @@
 use holdem::HandClass;
-use preflop::{evaluate, Action, Config, Model, Node, Solver, Tree};
+use preflop::{action_values, evaluate, prior, Action, Config, Model, Node, Solver, Tree};
 
 fn actions_at(tree: &Tree, path: &[Action]) -> (usize, Vec<Action>) {
     match &tree.nodes[tree.follow(path).expect("路径存在")] {
@@ -154,4 +154,53 @@ fn saved_strategy_round_trips() {
     };
     let row: f64 = loaded[*offset..offset + actions.len()].iter().sum();
     assert!((row - 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn action_values_match_strategy() {
+    let (tree, model, strategy) = solve(2, 1_000);
+    let values = action_values(&tree, &model, &strategy);
+    let Node::Decision { offset, .. } = &tree.nodes[tree.root()] else {
+        panic!()
+    };
+    let ev =
+        |name: &str, k: usize| values[offset + HandClass::from_name(name).unwrap().index() * 2 + k];
+
+    // 小盲弃牌固定输掉 0.5bb；AA 开池比弃牌好得多。
+    assert!((ev("72o", 0) + 0.5).abs() < 1e-9);
+    assert!(ev("AA", 1) > 1.0);
+
+    // 按策略加权的根节点 EV 等于小盲的整体期望收益。
+    let total: f64 = prior()
+        .iter()
+        .enumerate()
+        .map(|(h, w)| {
+            w * (0..2)
+                .map(|k| strategy[offset + h * 2 + k] * values[offset + h * 2 + k])
+                .sum::<f64>()
+        })
+        .sum();
+    let report = evaluate(&tree, &model, &strategy);
+    assert!(
+        (total - report.ev[0]).abs() < 1e-9,
+        "{total} vs {}",
+        report.ev[0]
+    );
+
+    // 接近均衡时，常用的动作 EV 都接近这手牌的最好动作。
+    for h in 0..holdem::NUM_CLASSES {
+        let best = ev_max(&values[offset + h * 2..offset + h * 2 + 2]);
+        for k in 0..2 {
+            if strategy[offset + h * 2 + k] > 0.2 {
+                assert!(
+                    best - values[offset + h * 2 + k] < 0.05,
+                    "第 {h} 类动作 {k}"
+                );
+            }
+        }
+    }
+}
+
+fn ev_max(xs: &[f64]) -> f64 {
+    xs.iter().copied().fold(f64::NEG_INFINITY, f64::max)
 }

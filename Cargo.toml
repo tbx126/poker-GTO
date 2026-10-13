@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+license = "AGPL-3.0-only"
+
+# 求解器测试要跑上千轮迭代，测试也按优化模式编译。
+[profile.test]
+opt-level = 3

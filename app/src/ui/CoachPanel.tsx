@@ -97,7 +97,12 @@ export function Verdict({ f, title = "上一个决策" }: { f: Feedback; title?:
           {f.strategy.equity !== undefined && `，你对随机手牌的胜率约 ${(f.strategy.equity * 100).toFixed(0)}%`}。
         </p>
       )}
-      {f.strategy.source === "table" && <p className="coach-note">翻前范围表只有频率，没有每个动作的 EV。</p>}
+      {f.strategy.source === "table" && f.evLoss === undefined && (
+        <p className="coach-note">这份范围表只有频率，没有每个动作的 EV。</p>
+      )}
+      {f.strategy.source === "table" && f.evLoss !== undefined && (
+        <p className="coach-note">EV 是整手牌的净输赢，已经放进底池的盲注和加注也算在内。</p>
+      )}
     </section>
   );
 }

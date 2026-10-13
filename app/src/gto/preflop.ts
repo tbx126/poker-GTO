@@ -20,6 +20,8 @@ export interface Spot {
   actions: string[];
   /** 每手牌：[到达权重, 各动作频率...]，顺序和 RangeTable.hands 一致。 */
   hands: number[][];
+  /** 每手牌每个动作的 EV（bb，整手牌的净输赢），和 hands 平行；旧版导出没有。 */
+  ev?: number[][];
 }
 
 export interface IndexedTable {
@@ -48,7 +50,7 @@ export function validateTable(value: unknown, players: number): RangeTable {
   if (t.players !== players) throw new Error(`这是 ${t.players} 人桌的范围表，当前选的是 ${players} 人`);
   if (t.hands.length !== 169) throw new Error("范围表应包含 169 种起手牌");
   for (const s of t.spots) {
-    if (!Array.isArray(s.history) || !Array.isArray(s.actions) || s.hands.length !== 169)
+    if (!Array.isArray(s.history) || !Array.isArray(s.actions) || s.hands.length !== 169 || (s.ev && s.ev.length !== 169))
       throw new Error(`局面 ${s.actor ?? "?"} 的数据不完整`);
   }
   return t;
@@ -103,10 +105,12 @@ export function lookupPreflop(t: IndexedTable, s: GameState, seat: number): Stra
   const moves = legalMoves(s);
   const actions = moves.map((move) => {
     const k = spot.actions.indexOf(move.label);
-    return { move, freq: k >= 0 ? row[k + 1] : 0 };
+    return { move, freq: k >= 0 ? row[k + 1] : 0, ev: k >= 0 ? spot.ev?.[h][k] : undefined };
   });
   const total = actions.reduce((x, a) => x + a.freq, 0);
   if (total <= 0) return null;
   for (const a of actions) a.freq /= total;
+  // 只有每个动作都有 EV 时才保留，避免一部分有一部分没有。
+  if (actions.some((a) => a.ev === undefined)) for (const a of actions) delete a.ev;
   return { source: "table", actions };
 }

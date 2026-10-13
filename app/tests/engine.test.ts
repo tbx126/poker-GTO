@@ -123,6 +123,7 @@ describe("翻前动作和范围表一致", () => {
         expect(legalMoves(s).map((m) => m.label)).toEqual(spot.actions);
         const strategy = lookupPreflop(t, s, toAct(s)!);
         expect(strategy).not.toBeNull();
+        expect(strategy!.actions.every((a) => a.ev !== undefined)).toBe(true);
       }
     });
   }

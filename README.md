@@ -15,6 +15,8 @@
 - [x] 求解器接口（`crates/solver-api`）：翻后两人底池后台求解、进度、每个动作的 EV，给 Tauri 外壳调用
 - [x] Tauri 桌面外壳，GitHub Actions 打 Windows 安装包
 - [x] 把翻后求解器接进界面：两人底池一发牌就后台求解，显示进度，纠错用求解器的频率和 EV
+- [x] 多人底池的规则近似（`Engine::approx`）：按对手动作收窄翻前范围，蒙特卡洛算每个动作的 EV，几十毫秒出结果
+- [ ] 界面改用后端的多人底池近似
 
 ## 开发
 
@@ -27,6 +29,7 @@ cargo run --release -p preflop --bin solve -- 6          # 求解并导出 6 人
 cargo run --release -p preflop --bin export -- 6         # 不重新求解，只从已保存的 6 人范围表重新导出 JSON
 cargo run --release -p postflop --example bench -- 6 Td9d6h srp  # 6 人桌 BTN 开池 BB 跟注的翻牌求解计时
 cargo run --release -p solver-api --example smoke -- hand.json 5   # 按前端的手牌状态求解，打印座位 5 的策略
+cargo run --release -p solver-api --example approx -- hand.json 3 '[{"kind":"check","to":0},{"kind":"bet","to":2.6}]'  # 多人底池规则近似
 cargo run --release -p solver-api --example fixture        # 重新生成前端对照用的翻后动作表 app/tests/fixtures/postflop-moves.json
 ```
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseCards, rng, shuffledDeck } from "../src/engine/cards";
-import { apply, defaultConfig, legalMoves, newHand, pot } from "../src/engine/game";
-import { judge, mapSolverActions, sample, severity } from "../src/gto/coach";
+import { apply, defaultConfig, legalMoves, newHand, pot, toAct } from "../src/engine/game";
+import { PostflopSolver, judge, mapSolverActions, sample, setPostflopSolver, severity, strategyFor } from "../src/gto/coach";
 import { handState } from "../src/gto/tauri";
 import type { Strategy } from "../src/gto/types";
 
@@ -82,5 +82,48 @@ describe("求解器结果对应到合法动作", () => {
       postflop: [{ street: 1, seat: 1, kind: "check", to: 0 }],
       cards: [["As", "Ks"], ["Qh", "2d"]],
     });
+  });
+});
+
+describe("翻后策略来源", () => {
+  // 三人桌走到翻牌：多人底池，求解器不支持，用后端近似；后端近似出错时退回前端估算。
+  let h = newHand(defaultConfig(3), shuffledDeck(rng(5)), "m");
+  h = apply(h, legalMoves(h).find((m) => m.kind === "raise")!);
+  while (h.street === 0) h = apply(h, legalMoves(h).find((m) => m.kind === "call" || m.kind === "check")!);
+  const seat = toAct(h)!;
+  const fake = (approx: PostflopSolver["approx"]): PostflopSolver => ({
+    supports: async () => false,
+    prepare: () => {},
+    solve: async () => ({ source: "solver", actions: [] }),
+    cancel: () => {},
+    approx,
+  });
+
+  it("求解器不支持时用后端近似", async () => {
+    setPostflopSolver(
+      fake(async (st) => ({
+        source: "approx",
+        actions: legalMoves(st).map((move, i) => ({ move, freq: i === 0 ? 1 : 0, ev: 0 })),
+        equity: 0.4,
+        equityVs: "ranges",
+      })),
+    );
+    const st = await strategyFor(h, seat, null);
+    expect(st.equityVs).toBe("ranges");
+    expect(st.actions[0].freq).toBe(1);
+    setPostflopSolver(null);
+  });
+
+  it("后端近似出错时退回前端估算", async () => {
+    setPostflopSolver(
+      fake(async () => {
+        throw new Error("不在范围表里");
+      }),
+    );
+    const st = await strategyFor(h, seat, null);
+    expect(st.source).toBe("approx");
+    expect(st.equityVs).toBeUndefined();
+    expect(st.actions.reduce((x, a) => x + a.freq, 0)).toBeCloseTo(1, 6);
+    setPostflopSolver(null);
   });
 });

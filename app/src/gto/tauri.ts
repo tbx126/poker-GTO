@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { cardName } from "../engine/cards";
-import { GameState, preflopHistory } from "../engine/game";
+import { GameState, legalMoves, preflopHistory } from "../engine/game";
 import { PostflopSolver, SolverAction, mapSolverActions } from "./coach";
 
 /** 是否运行在 Tauri 桌面应用里（浏览器里没有后端求解器）。 */
@@ -46,6 +46,22 @@ export const tauriSolver: PostflopSolver = {
       seat,
     });
     return mapSolverActions(s, r.actions, r.exploitability, r.converged);
+  },
+  async approx(s, seat) {
+    const legal = legalMoves(s);
+    const r = await invoke<{ actions: { freq: number; ev: number }[]; equity: number }>("solver_approx", {
+      state: handState(s),
+      seat,
+      legal: legal.map((m) => ({ kind: m.kind, to: m.to })),
+    });
+    // 后端按传入的合法动作逐一返回，顺序相同。
+    if (r.actions.length !== legal.length) throw new Error("近似策略的动作数和合法动作对不上");
+    return {
+      source: "approx",
+      actions: legal.map((move, i) => ({ move, freq: r.actions[i].freq, ev: Math.round(r.actions[i].ev * 100) / 100 })),
+      equity: r.equity,
+      equityVs: "ranges",
+    };
   },
   cancel(handId) {
     invoke("solver_cancel", { handId }).catch(() => {});

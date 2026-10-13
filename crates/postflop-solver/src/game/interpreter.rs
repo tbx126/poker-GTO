@@ -779,25 +779,62 @@ impl PostFlopGame {
         let total_bet_amount = self.total_bet_amount();
         let bias = (total_bet_amount[player] - total_bet_amount[player ^ 1]).max(0);
 
+        // 改动（本仓库）：自己走到这里的概率为 0 的手牌（比如玩家偏离了均衡），
+        // 原实现直接给 0。这里改用 1 / 对手权重来归一化，反事实收益本身不依赖自己的到达概率。
+        let ratios: Vec<f32> = (0..num_hands)
+            .map(|i| {
+                let w_raw = self.weights[player][i];
+                let w_normalized = self.normalized_weights[player][i];
+                if w_normalized > 0.0 {
+                    w_raw / w_normalized
+                } else if w_raw == 0.0 && self.bunching_num_dead_cards == 0 {
+                    let opponent = self.opponent_weight(player, i);
+                    if opponent > 0.0 {
+                        1.0 / opponent
+                    } else {
+                        0.0
+                    }
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+
         ret.chunks_exact_mut(num_hands)
             .enumerate()
             .for_each(|(action, row)| {
                 let is_fold = have_actions && self.node().play(action).prev_action == Action::Fold;
                 self.apply_swap(row, player, false);
-                row.iter_mut()
-                    .zip(self.weights[player].iter())
-                    .zip(self.normalized_weights[player].iter())
-                    .for_each(|((v, &w_raw), &w_normalized)| {
-                        if is_fold || w_normalized == 0.0 {
-                            *v = 0.0;
-                        } else {
-                            *v *= normalizer * (w_raw / w_normalized);
-                            *v += starting_pot as f32 * 0.5 + (self.node().amount + bias) as f32;
-                        }
-                    });
+                row.iter_mut().zip(ratios.iter()).for_each(|(v, &ratio)| {
+                    if is_fold || ratio == 0.0 {
+                        *v = 0.0;
+                    } else {
+                        *v *= normalizer * ratio;
+                        *v += starting_pot as f32 * 0.5 + (self.node().amount + bias) as f32;
+                    }
+                });
             });
 
         ret
+    }
+
+    /// 对手和第 `i` 手牌不冲突的组合的权重之和（不考虑 bunching）。
+    fn opponent_weight(&self, player: usize, i: usize) -> f32 {
+        let mut board_mask: u64 = 0;
+        if self.turn != NOT_DEALT {
+            board_mask |= 1 << self.turn;
+        }
+        if self.river != NOT_DEALT {
+            board_mask |= 1 << self.river;
+        }
+        let (c1, c2) = self.private_cards[player][i];
+        let mask: u64 = board_mask | (1 << c1) | (1 << c2);
+        self.private_cards[player ^ 1]
+            .iter()
+            .zip(self.weights[player ^ 1].iter())
+            .filter(|(&(o1, o2), _)| mask & ((1 << o1) | (1 << o2)) == 0)
+            .map(|(_, &w)| w as f64)
+            .sum::<f64>() as f32
     }
 
     /// Returns the strategy of the current player.

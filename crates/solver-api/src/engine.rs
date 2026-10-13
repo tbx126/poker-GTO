@@ -70,6 +70,7 @@ struct SolveState {
     game: Option<PostFlopGame>,
     error: Option<String>,
     exploitability: f32,
+    converged: bool,
 }
 
 type ProgressFn = Arc<dyn Fn(Progress) + Send + Sync>;
@@ -124,7 +125,7 @@ impl Engine {
         let hand = hole_cards(state, seat)?;
 
         let mut guard = wait(&solve)?;
-        let exploitability = guard.exploitability;
+        let (exploitability, converged) = (guard.exploitability, guard.converged);
         let game = guard.game.as_mut().ok_or("求解结果缺失")?;
         game.back_to_root();
         replay(game, state, street, &seats)?;
@@ -169,6 +170,7 @@ impl Engine {
         Ok(SolverStrategy {
             actions,
             exploitability,
+            converged,
         })
     }
 
@@ -246,9 +248,10 @@ impl Engine {
             let result = engine.run(&state, street, previous, &worker, on_progress);
             let mut guard = worker.state.lock().unwrap();
             match result {
-                Ok((game, exploitability)) => {
+                Ok((game, exploitability, converged)) => {
                     guard.game = Some(game);
                     guard.exploitability = exploitability;
+                    guard.converged = converged;
                 }
                 Err(e) => guard.error = Some(e),
             }
@@ -265,7 +268,7 @@ impl Engine {
         previous: Option<Arc<StreetSolve>>,
         solve_slot: &StreetSolve,
         on_progress: ProgressFn,
-    ) -> Result<(PostFlopGame, f32), String> {
+    ) -> Result<(PostFlopGame, f32, bool), String> {
         let table = self.table(state.players)?;
         let path = preflop_actions(&table.tree, &state.preflop)?;
         let seats = heads_up_seats(&table.tree, &path).ok_or("不是两人底池")?;
@@ -324,6 +327,7 @@ impl Engine {
                 exploitability: p.exploitability,
                 fraction: fraction(e0, p.exploitability, options.target),
                 done: false,
+                converged: false,
             });
         });
         if outcome == Outcome::Cancelled {
@@ -336,8 +340,9 @@ impl Engine {
             exploitability: last.exploitability,
             fraction: 1.0,
             done: true,
+            converged: outcome == Outcome::Converged,
         });
-        Ok((game, last.exploitability))
+        Ok((game, last.exploitability, outcome == Outcome::Converged))
     }
 }
 

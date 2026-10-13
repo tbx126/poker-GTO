@@ -51,6 +51,8 @@ pub struct Progress {
     /// 0 到 1，按可剥削度从初始值降到目标值的对数比例估算。
     pub fraction: f32,
     pub done: bool,
+    /// 结束时是否达到了目标精度；为 false 表示是到了时间或轮数上限才停的。
+    pub converged: bool,
 }
 
 /// 某个座位在当前节点的策略。
@@ -60,6 +62,8 @@ pub struct SolverStrategy {
     pub actions: Vec<ActionAdvice>,
     /// 这条街求解结束时的可剥削度（占底池比例）。
     pub exploitability: f32,
+    /// 是否达到了目标精度；为 false 表示到了时间或轮数上限，策略只是近似。
+    pub converged: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

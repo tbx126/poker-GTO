@@ -284,6 +284,7 @@ impl Engine {
                     ],
                     pot: line.contrib.iter().sum(),
                     stack,
+                    oop_can_lead: true,
                 }
             }
             Some(previous) => {

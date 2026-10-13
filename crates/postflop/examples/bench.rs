@@ -53,6 +53,7 @@ fn main() {
         ],
         pot,
         stack,
+        oop_can_lead: true,
     };
     println!(
         "{players} 人桌 {} vs {} {line}，底池 {pot}bb，有效筹码 {stack}bb，公共牌 {flop}",

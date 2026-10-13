@@ -11,8 +11,8 @@ mod solve;
 pub use range::{range_from_classes, range_from_combos};
 pub use sizes::{Sizes, StreetSizes};
 pub use solve::{
-    build_game, build_game_unallocated, next_street_spot, solve, Outcome, Progress, SolveOptions,
-    Spot,
+    build_game, build_game_unallocated, forbid_lead, next_street_spot, solve, tree_config, Outcome,
+    Progress, SolveOptions, Spot,
 };
 
 /// 每 bb 合多少个求解器筹码。

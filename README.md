@@ -26,6 +26,7 @@ cargo run --release -p preflop --bin solve -- 6          # 求解并导出 6 人
 cargo run --release -p preflop --bin export -- 6         # 不重新求解，只从已保存的 6 人范围表重新导出 JSON
 cargo run --release -p postflop --example bench -- 6 Td9d6h srp  # 6 人桌 BTN 开池 BB 跟注的翻牌求解计时
 cargo run --release -p solver-api --example smoke -- hand.json 5   # 按前端的手牌状态求解，打印座位 5 的策略
+cargo run --release -p solver-api --example fixture        # 重新生成前端对照用的翻后动作表 app/tests/fixtures/postflop-moves.json
 ```
 
 ## 界面

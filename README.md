@@ -12,7 +12,8 @@
 - [ ] 翻前求解器加速与范围表导出
 - [ ] 翻后两人底池求解器（基于 postflop-solver）
 - [x] 界面：规则引擎、牌桌、即时纠错、复盘、翻前范围查看与导入（`app/`，翻后暂用规则近似）
-- [ ] Tauri 外壳，把翻后求解器接进界面
+- [x] Tauri 桌面外壳，GitHub Actions 打 Windows 安装包
+- [ ] 把翻后求解器接进界面
 
 ## 开发
 
@@ -26,7 +27,7 @@ cargo run --release -p preflop --bin solve -- 6          # 求解并导出 6 人
 
 ## 界面
 
-`app/` 是 React + TypeScript 前端，之后由 Tauri 打包成桌面应用。
+`app/` 是 React + TypeScript 前端，`app/src-tauri/` 是 Tauri 桌面外壳。
 
 ```sh
 cd app
@@ -34,7 +35,11 @@ npm install
 npm run dev      # 本地预览
 npm test         # 规则引擎和纠错的单元测试
 npm run build    # 打包到 app/dist
+npm run tauri dev    # 以桌面应用运行（需要 Rust，Windows 自带 WebView2）
+npm run tauri build  # 打 Windows 安装包，输出在 src-tauri/target/release/bundle/nsis/
 ```
+
+每个 PR 的 CI 都会在 Windows 上打一次安装包，在那次运行的 Artifacts 里下载 `windows-installer`。
 
 - `src/engine/`：牌型评估、蒙特卡洛胜率、2 到 6 人现金局规则引擎。翻前动作和尺寸与 `crates/preflop` 的下注树一致，测试会逐个核对范围表里的局面。
 - `src/gto/`：策略来源。翻前查范围表，翻后通过 `setPostflopSolver` 接入求解器，没接入时用规则近似并在界面上标注“近似”。

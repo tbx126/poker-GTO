@@ -122,7 +122,14 @@ pub fn action_label(action: Action) -> String {
 
 /// 常用局面（开池、面对开池、面对 3bet）的策略，导出成 JSON 给界面查看。
 /// 只导出路径里最多两次主动投注（不算弃牌）、而且出现概率不低于 `min_reach` 的局面。
-pub fn export_spots_json(tree: &Tree, strategy: &[f64], meta: &Meta, min_reach: f64) -> String {
+/// `values` 是 [`crate::action_values`] 算出的各动作 EV，和策略同样布局。
+pub fn export_spots_json(
+    tree: &Tree,
+    strategy: &[f64],
+    values: &[f64],
+    meta: &Meta,
+    min_reach: f64,
+) -> String {
     let prior = crate::solver::prior();
     let config = &tree.config;
     let mut spots = Vec::new();
@@ -150,11 +157,11 @@ pub fn export_spots_json(tree: &Tree, strategy: &[f64], meta: &Meta, min_reach: 
         let a = actions.len();
         let rows = &strategy[*offset..offset + N * a];
         spots.push(spot_json(
-            config,
-            *player,
+            config.position_name(*player),
             &path,
             actions,
             rows,
+            &values[*offset..offset + N * a],
             &ranges[*player],
             reach,
         ));
@@ -196,11 +203,11 @@ pub fn export_spots_json(tree: &Tree, strategy: &[f64], meta: &Meta, min_reach: 
 }
 
 fn spot_json(
-    config: &Config,
-    player: usize,
+    actor: &str,
     path: &[String],
     actions: &[Action],
     rows: &[f64],
+    values: &[f64],
     range: &[f64],
     reach: f64,
 ) -> String {
@@ -223,12 +230,22 @@ fn spot_json(
             format!("[{:.3},{}]", weight, freqs.join(","))
         })
         .collect();
+    // 每手牌各动作的 EV，单位 bb，按整手牌净输赢计，两位小数。
+    let evs: Vec<String> = (0..N)
+        .map(|h| {
+            let ev: Vec<String> = (0..a)
+                .map(|k| format!("{:.2}", values[h * a + k]))
+                .collect();
+            format!("[{}]", ev.join(","))
+        })
+        .collect();
     format!(
-        "{{\"actor\":\"{}\",\"history\":[{}],\"reach\":{:.5},\"actions\":[{}],\"hands\":[{}]}}",
-        config.position_name(player),
+        "{{\"actor\":\"{}\",\"history\":[{}],\"reach\":{:.5},\"actions\":[{}],\"hands\":[{}],\"ev\":[{}]}}",
+        actor,
         history.join(","),
         reach,
         labels.join(","),
-        hands.join(",")
+        hands.join(","),
+        evs.join(",")
     )
 }

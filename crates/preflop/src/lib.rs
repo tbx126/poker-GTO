@@ -9,6 +9,6 @@ mod store;
 mod tree;
 
 pub use model::{Model, Realization};
-pub use solver::{evaluate, prior, Report, Solver};
+pub use solver::{action_values, evaluate, prior, Report, Solver};
 pub use store::{action_label, export_spots_json, load, save, Meta};
 pub use tree::{Action, Config, Node, Tree};

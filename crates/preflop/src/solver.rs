@@ -313,7 +313,7 @@ pub fn evaluate(tree: &Tree, model: &Model, strategy: &[f64]) -> Report {
     let prior = prior();
     let value = |p: usize, best: bool| {
         let reach = vec![prior.clone(); players];
-        let cfv = eval_node(tree, model, strategy, tree.root(), p, best, reach);
+        let cfv = eval_node(tree, model, strategy, tree.root(), p, best, reach, None);
         cfv.iter().zip(&prior).map(|(v, w)| v * w).sum()
     };
     Report {
@@ -322,6 +322,30 @@ pub fn evaluate(tree: &Tree, model: &Model, strategy: &[f64]) -> Report {
     }
 }
 
+/// 平均策略下，每个决策节点上行动者拿每类起手牌选每个动作的期望收益，单位 bb，
+/// 按整手牌的净输赢计（已扣掉此前投入的筹码），布局与策略数组相同。
+/// 两个动作的差就是选错动作的 EV 损失。到达概率为 0 的节点记为 0。
+pub fn action_values(tree: &Tree, model: &Model, strategy: &[f64]) -> Vec<f64> {
+    let players = tree.config.players;
+    let out = Mutex::new(vec![0.0; tree.strategy_len]);
+    for p in 0..players {
+        let reach = vec![prior(); players];
+        eval_node(
+            tree,
+            model,
+            strategy,
+            tree.root(),
+            p,
+            false,
+            reach,
+            Some(&out),
+        );
+    }
+    out.into_inner().unwrap()
+}
+
+/// `record` 不为空时，把 `p` 在自己决策节点上各动作的条件期望收益写进去。
+#[allow(clippy::too_many_arguments)]
 fn eval_node(
     tree: &Tree,
     model: &Model,
@@ -330,6 +354,7 @@ fn eval_node(
     p: usize,
     best: bool,
     reach: Vec<Vec<f64>>,
+    record: Option<&Mutex<Vec<f64>>>,
 ) -> Vec<f64> {
     match &tree.nodes[node] {
         Node::Terminal {
@@ -346,10 +371,25 @@ fn eval_node(
             let a = actions.len();
             let sigma = &strategy[*offset..offset + N * a];
             let values = branch(&reach, *player, children, sigma, |child, reach| {
-                eval_node(tree, model, strategy, child, p, best, reach)
+                eval_node(tree, model, strategy, child, p, best, reach, record)
             });
             if *player != p {
                 return sum(values);
+            }
+            if let Some(record) = record {
+                // 反事实收益已乘上其他人的到达概率，除掉后就是到达这里时的条件期望。
+                let others: f64 = (0..reach.len())
+                    .filter(|&j| j != p)
+                    .map(|j| reach[j].iter().sum::<f64>())
+                    .product();
+                if others > 0.0 {
+                    let mut record = record.lock().unwrap();
+                    for h in 0..N {
+                        for k in 0..a {
+                            record[offset + h * a + k] = values[k][h] / others;
+                        }
+                    }
+                }
             }
             (0..N)
                 .map(|h| {

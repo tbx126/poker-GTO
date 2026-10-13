@@ -578,6 +578,16 @@ button:focus-visible, [tabindex]:focus-visible, input:focus-visible {
   color: var(--muted);
 }
 .source.approx { border-color: var(--g-inaccuracy); color: var(--g-inaccuracy); }
+.solver { display: grid; gap: 6px; }
+.solver h2 .num { color: var(--fg); letter-spacing: 0; }
+.solver-track { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.solver-track span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--brass), var(--call));
+  transition: width 0.4s var(--ease);
+}
 .verdict { display: grid; gap: 6px; }
 .verdict .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
 .grade {

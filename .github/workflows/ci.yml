@@ -34,3 +34,36 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  # 在 Windows 上编译桌面应用并打出安装包，可以在这次运行的 Artifacts 里下载。
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - run: npm ci
+        working-directory: app
+      # 编译外壳时要求前端已经打包好。
+      - run: npm run build
+        working-directory: app
+      - run: cargo fmt --check
+        working-directory: app/src-tauri
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: app/src-tauri
+      - run: npm run tauri build
+        working-directory: app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: app/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error

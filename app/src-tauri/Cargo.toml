@@ -1,0 +1,23 @@
+[package]
+name = "poker-app"
+version = "0.1.0"
+description = "德州扑克 GTO 训练桌面应用"
+edition = "2021"
+license = "AGPL-3.0-only"
+
+# 桌面外壳单独成一个工作区：它依赖系统的 WebView 库，不放进根工作区，
+# 这样 `cargo test` 在没有这些库的机器上也能跑。
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+solver-api = { path = "../../crates/solver-api" }
+
+[profile.release]
+codegen-units = 1
+lto = true

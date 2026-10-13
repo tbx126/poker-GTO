@@ -73,7 +73,7 @@ export function worstDecision(h: HandRecord): number | null {
 }
 
 function HandReplay({ record }: { record: HandRecord }) {
-  const states = useMemo(() => replay(defaultConfig(record.players), record.deck, record.moves), [record]);
+  const states = useMemo(() => replay(defaultConfig(record.players), record.deck, record.moves, record.id), [record]);
   const [step, setStep] = useState(states.length - 1);
   const worst = worstDecision(record);
   const decisions = Object.keys(record.feedback)

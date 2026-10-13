@@ -24,7 +24,8 @@ export function App() {
 
   const onHandDone = useCallback((r: HandRecord) => {
     setHistory((h) => {
-      const next = [...h, r];
+      // 同一手牌可能存两次（之后补上了纠错），按编号覆盖。
+      const next = h.some((x) => x.id === r.id) ? h.map((x) => (x.id === r.id ? { ...r, at: x.at } : x)) : [...h, r];
       saveHistory(next);
       return next;
     });

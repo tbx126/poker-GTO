@@ -1,8 +1,10 @@
 //! 求解并保存翻前范围表：
 //! `cargo run --release -p preflop --bin solve -- <人数> [目标 bb/100，默认 0.5] [最多轮数，默认 5000]`
 //!
-//! 输出 `data/preflop/<人数>max.bin`（完整策略）和 `data/preflop/<人数>max.json`（常用局面，给界面查看）。
-use preflop::{evaluate, export_spots_json, save, Config, Meta, Model, Solver, Tree};
+//! 输出 `data/preflop/<人数>max.bin`（完整策略）和 `data/preflop/<人数>max.json`（常用局面的频率和各动作 EV，给界面查看）。
+use preflop::{
+    action_values, evaluate, export_spots_json, save, Config, Meta, Model, Solver, Tree,
+};
 use std::io::BufWriter;
 use std::time::Instant;
 
@@ -58,7 +60,11 @@ fn main() -> std::io::Result<()> {
         &meta,
     )?;
     let json = format!("data/preflop/{players}max.json");
-    std::fs::write(&json, export_spots_json(&tree, &strategy, &meta, 0.001))?;
+    let values = action_values(&tree, &model, &strategy);
+    std::fs::write(
+        &json,
+        export_spots_json(&tree, &strategy, &values, &meta, 0.001),
+    )?;
     println!("已写入 {bin} 和 {json}");
     Ok(())
 }

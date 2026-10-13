@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { GameState } from "../engine/game";
 import { STREET_NAMES } from "../engine/game";
 import { Feedback, GRADE_LABELS } from "../gto/coach";
@@ -21,6 +22,11 @@ interface Props {
 export function CoachPanel({ state, heroSeat, coach, feedback, hint, progress }: Props) {
   const keys = Object.keys(feedback).map(Number).sort((a, b) => a - b);
   const latest = keys.length ? feedback[keys[keys.length - 1]] : null;
+  const log = useRef<HTMLDivElement>(null);
+  // 新动作出现时滚到最下面。
+  useEffect(() => {
+    log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" });
+  }, [state.events.length]);
 
   return (
     <aside className="coach" aria-label="GTO 教练">
@@ -43,9 +49,9 @@ export function CoachPanel({ state, heroSeat, coach, feedback, hint, progress }:
         </section>
       )}
 
-      <section>
+      <section className="log-section">
         <h2>本手动作</h2>
-        <div className="log">
+        <div className="log" ref={log}>
           {state.events.length === 0 && <p className="empty">盲注已下，等待第一个行动。</p>}
           {state.events.map((e, i) => {
             const f = feedback[i];

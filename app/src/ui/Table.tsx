@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { ActionKind, GameState, STREET_NAMES, pot } from "../engine/game";
+import { GameState, Move, STREET_NAMES, pot } from "../engine/game";
 import { PlayingCard } from "./PlayingCard";
 import { ACTION_COLORS, fmtBB, signed } from "./colors";
 
@@ -25,7 +25,7 @@ export function Table({ state, heroSeat, handKey, revealAll, thinking, still }: 
 
   const result = state.result;
   const street = result ? lastStreet(state) : state.street;
-  const lastAction = new Map<number, { kind: string; label: string }>();
+  const lastAction = new Map<number, Move>();
   for (const e of state.events) if (e.street === street) lastAction.set(e.seat, e.move);
   const button = n === 2 ? 0 : n - 3;
   const totalPot = pot(state);
@@ -33,12 +33,20 @@ export function Table({ state, heroSeat, handKey, revealAll, thinking, still }: 
 
   return (
     <div className="table-wrap">
-      <div className="felt" aria-hidden="true">
-        <div className="felt-mark">GTO · 100BB · {n} 人桌</div>
-      </div>
+      <div className="felt" aria-hidden="true" />
 
       <div className="center">
-        <div className="street-tag">{result ? (result.showdown ? "摊牌" : "结束") : STREET_NAMES[state.street]}</div>
+        <div className="streets" aria-label={`当前：${result ? (result.showdown ? "摊牌" : "结束") : STREET_NAMES[state.street]}`}>
+          {result ? (
+            <span className="on">{result.showdown ? "摊牌" : "结束"}</span>
+          ) : (
+            STREET_NAMES.slice(0, 4).map((name, k) => (
+              <span key={name} className={k === state.street ? "on" : k < state.street ? "past" : ""}>
+                {name}
+              </span>
+            ))
+          )}
+        </div>
         <div className="board" aria-label="公共牌">
           {state.board.map((c, i) => (
             <PlayingCard
@@ -70,6 +78,8 @@ export function Table({ state, heroSeat, handKey, revealAll, thinking, still }: 
       {state.seats.map((seat, i) => {
         const isHero = i === heroSeat;
         const showCards = isHero || revealAll || (result?.showdown && !seat.folded);
+        // 弃牌的对手收起底牌，只在名牌上标出来；复盘亮牌时照常显示。
+        const mucked = seat.folded && !isHero && !revealAll;
         const winner = result && result.won[i] > 0;
         const action = lastAction.get(i);
         const acting = thinking?.seat === i;
@@ -81,7 +91,7 @@ export function Table({ state, heroSeat, handKey, revealAll, thinking, still }: 
             style={{ ...geo(i), left: "calc(50% + var(--cx) * var(--rx))", top: "calc(50% + var(--cy) * var(--ry))" }}
           >
             <div className="hole">
-              {seat.cards.map((c, k) => (
+              {!mucked && seat.cards.map((c, k) => (
                 <PlayingCard
                   key={`${handKey}-${i}-${k}-${showCards ? "f" : "b"}`}
                   card={showCards ? c : null}
@@ -93,7 +103,6 @@ export function Table({ state, heroSeat, handKey, revealAll, thinking, still }: 
               ))}
             </div>
             <div className="plate">
-              {action && !result && <span className={`bubble ${action.kind}`}>{action.label}</span>}
               <span className="who">
                 <b>{seat.pos}</b>
                 {isHero && <span className="you">你</span>}
@@ -106,6 +115,13 @@ export function Table({ state, heroSeat, handKey, revealAll, thinking, still }: 
               {result?.hands[i] && <span className="hand-name">{result.hands[i]}</span>}
               {acting && <span className="timer" style={{ "--think": `${thinking!.ms}ms` } as CSSProperties} />}
             </div>
+            {action && !result ? (
+              <span key={`${state.events.length}-${action.label}`} className={`bubble ${action.kind}`}>
+                {action.kind === "bet" && action.fraction ? `下注 ${Math.round(action.fraction * 100)}%` : action.label}
+              </span>
+            ) : (
+              <span className="bubble none" />
+            )}
           </div>
         );
       })}
@@ -120,7 +136,7 @@ export function Table({ state, heroSeat, handKey, revealAll, thinking, still }: 
               className="chips"
               style={{ ...geo(i), left: "calc(50% + var(--cx) * var(--bx))", top: "calc(50% + var(--cy) * var(--by))" }}
             >
-              <ChipStack color={action ? ACTION_COLORS[action.kind as ActionKind] : "var(--fold)"} />
+              <ChipStack color={action ? ACTION_COLORS[action.kind] : "var(--fold)"} />
               {fmtBB(seat.street)}
             </div>
           );

@@ -88,7 +88,15 @@ export function Play({ settings, onHandDone }: Props) {
     solver.supports(s).then(
       (ok) => {
         if (!live || !ok) return;
-        setProgress({ handId: s.id, street: s.street, iteration: 0, exploitability: 1, fraction: 0, done: false, converged: false });
+        setProgress({
+          handId: s.id,
+          street: s.street,
+          iteration: 0,
+          exploitability: 1,
+          fraction: 0,
+          done: false,
+          converged: false,
+        });
         solver.prepare(s);
       },
       () => {},
@@ -192,39 +200,44 @@ export function Play({ settings, onHandDone }: Props) {
     <div className="play">
       <div className="stage">
         <Table state={s} heroSeat={hand.heroSeat} handKey={hand.id} thinking={thinking} />
-        {s.result ? (
-          <div className="result-line">
-            <span>
-              这手{heroNet! > 0 ? "赢了" : heroNet! < 0 ? "输了" : "持平"}{" "}
-              <span className={`num ${heroNet! > 0 ? "pos" : heroNet! < 0 ? "neg" : ""}`}>{signed(heroNet!)} bb</span>
-            </span>
-            <button type="button" className="primary" onClick={next}>
-              下一手 <span className="num" style={{ opacity: 0.6, fontSize: 12 }}>空格</span>
-            </button>
-          </div>
-        ) : heroTurn ? (
-          <ActionBar
-            moves={legalMoves(s)}
-            committed={s.seats[hand.heroSeat].street}
-            hint={settings.hints ? hint : null}
-            onMove={onMove}
-          />
-        ) : (
-          <div className="actionbar">
-            <span className="waiting">
-              {table === undefined
-                ? "读取范围表"
-                : solving
-                  ? `${s.seats[actor ?? 0].pos} 等求解器 ${Math.round(progress!.fraction * 100)}%`
-                  : `${s.seats[actor ?? 0].pos} 思考中`}
-              <span className="dots">
-                <i />
-                <i />
-                <i />
+        <div className="dock">
+          {s.result ? (
+            <div className="result-line">
+              <span>
+                这手{heroNet! > 0 ? "赢了" : heroNet! < 0 ? "输了" : "持平"}{" "}
+                <span className={`num ${heroNet! > 0 ? "pos" : heroNet! < 0 ? "neg" : ""}`}>{signed(heroNet!)} bb</span>
               </span>
-            </span>
-          </div>
-        )}
+              <button type="button" className="primary" onClick={next}>
+                下一手{" "}
+                <span className="num" style={{ opacity: 0.6, fontSize: 12 }}>
+                  空格
+                </span>
+              </button>
+            </div>
+          ) : heroTurn ? (
+            <ActionBar
+              moves={legalMoves(s)}
+              committed={s.seats[hand.heroSeat].street}
+              hint={settings.hints ? hint : null}
+              onMove={onMove}
+            />
+          ) : (
+            <div className="actionbar">
+              <span className="waiting">
+                {table === undefined
+                  ? "读取范围表"
+                  : solving
+                    ? `${s.seats[actor ?? 0].pos} 等求解器 ${Math.round(progress!.fraction * 100)}%`
+                    : `${s.seats[actor ?? 0].pos} 思考中`}
+                <span className="dots">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </span>
+            </div>
+          )}
+        </div>
       </div>
       <CoachPanel
         state={s}

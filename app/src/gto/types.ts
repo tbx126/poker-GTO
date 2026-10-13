@@ -17,8 +17,10 @@ export interface ActionAdvice {
 export interface Strategy {
   source: "table" | "solver" | "approx";
   actions: ActionAdvice[];
-  /** 对随机手牌的胜率，近似策略会给出。 */
+  /** 摊牌胜率，近似策略会给出。 */
   equity?: number;
+  /** 胜率是对随机手牌（前端估算），还是对按动作收窄后的对手范围（后端近似）。 */
+  equityVs?: "random" | "ranges";
   /** 求解器给出的可剥削度（占底池的比例）。 */
   exploitability?: number;
   /** 求解器是否收敛到目标精度；false 表示到了时间或轮数上限就停了。 */

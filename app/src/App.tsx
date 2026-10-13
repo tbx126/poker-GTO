@@ -54,7 +54,7 @@ export function App() {
         <NavButton id="review" view={view} setView={setView} label="复盘" icon={<ReplayIcon />} />
         <NavButton id="ranges" view={view} setView={setView} label="范围" icon={<GridIcon />} />
       </nav>
-      <main className="main">
+      <main className={`main${view === "play" ? " fill" : ""}`}>
         <header className="topbar">
           <h1>{TITLES[view]}</h1>
           {view === "play" && (
@@ -81,7 +81,7 @@ export function App() {
           <div className="stats" aria-label="本次统计">
             <Stat label="本次手数" value={String(stats.hands)} />
             <Stat label="净赢 bb" value={signed(stats.net)} tone={stats.net} />
-            <Stat label="bb/100" value={stats.hands ? signed(stats.bb100) : "—"} tone={stats.bb100} />
+            <Stat label="bb/100" value={stats.hands >= 10 ? signed(Math.round(stats.bb100)) : "—"} tone={stats.bb100} />
             <Stat label="决策准确率" value={stats.accuracy === null ? "—" : `${fmtBB(stats.accuracy * 100)}%`} />
           </div>
         </header>

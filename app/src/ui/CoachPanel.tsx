@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { GameState } from "../engine/game";
 import { STREET_NAMES } from "../engine/game";
 import { Feedback, GRADE_LABELS } from "../gto/coach";
@@ -19,8 +20,15 @@ interface Props {
 }
 
 export function CoachPanel({ state, heroSeat, coach, feedback, hint, progress }: Props) {
-  const keys = Object.keys(feedback).map(Number).sort((a, b) => a - b);
+  const keys = Object.keys(feedback)
+    .map(Number)
+    .sort((a, b) => a - b);
   const latest = keys.length ? feedback[keys[keys.length - 1]] : null;
+  const log = useRef<HTMLDivElement>(null);
+  // 新动作出现时滚到最下面。
+  useEffect(() => {
+    log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" });
+  }, [state.events.length]);
 
   return (
     <aside className="coach" aria-label="GTO 教练">
@@ -38,14 +46,16 @@ export function CoachPanel({ state, heroSeat, coach, feedback, hint, progress }:
         <section className="verdict">
           <h2>GTO 教练</h2>
           <p className="empty">
-            {coach ? "你做出决策后，这里会显示 GTO 的动作频率和你损失的 EV。" : "纠错已关闭，打完可以在复盘里查看每个决策。"}
+            {coach
+              ? "你做出决策后，这里会显示 GTO 的动作频率和你损失的 EV。"
+              : "纠错已关闭，打完可以在复盘里查看每个决策。"}
           </p>
         </section>
       )}
 
-      <section>
+      <section className="log-section">
         <h2>本手动作</h2>
-        <div className="log">
+        <div className="log" ref={log}>
           {state.events.length === 0 && <p className="empty">盲注已下，等待第一个行动。</p>}
           {state.events.map((e, i) => {
             const f = feedback[i];
@@ -53,7 +63,11 @@ export function CoachPanel({ state, heroSeat, coach, feedback, hint, progress }:
               <div key={i} className={`log-row${e.seat === heroSeat ? " hero" : ""}`}>
                 <span className="st">{STREET_NAMES[e.street]}</span>
                 <span className="who">{state.seats[e.seat].pos}</span>
-                <span>{e.move.kind === "bet" && e.move.fraction ? `${shortLabel(e.move)} · ${fmtBB(e.move.to)}` : e.move.label}</span>
+                <span>
+                  {e.move.kind === "bet" && e.move.fraction
+                    ? `${shortLabel(e.move)} · ${fmtBB(e.move.to)}`
+                    : e.move.label}
+                </span>
                 {f && coach ? <span className={`dot g-${f.grade}`} title={GRADE_LABELS[f.grade]} /> : <span />}
               </div>
             );
@@ -115,15 +129,20 @@ export function Verdict({ f, title = "上一个决策" }: { f: Feedback; title?:
         {STREET_NAMES[f.street]}你选了 <b>{shortLabel(f.chosen)}</b>，GTO 频率 {(f.freq * 100).toFixed(0)}%。
         {!same && (
           <>
-            {" "}最常用的是 <b>{shortLabel(f.best)}</b>（{(f.bestFreq * 100).toFixed(0)}%）。
+            {" "}
+            最常用的是 <b>{shortLabel(f.best)}</b>（{(f.bestFreq * 100).toFixed(0)}%）。
           </>
         )}
       </p>
       <StrategyBars strategy={f.strategy} chosen={f.chosen} />
       {f.strategy.source === "approx" && (
         <p className="coach-note">
-          按胜率和底池赔率估算的近似策略
-          {f.strategy.equity !== undefined && `，你对随机手牌的胜率约 ${(f.strategy.equity * 100).toFixed(0)}%`}。
+          {f.strategy.equityVs === "ranges"
+            ? "按对手的实际动作收窄范围后估算的近似策略"
+            : "按胜率和底池赔率估算的近似策略"}
+          {f.strategy.equity !== undefined &&
+            `，你对${f.strategy.equityVs === "ranges" ? "对手范围" : "随机手牌"}的胜率约 ${(f.strategy.equity * 100).toFixed(0)}%`}
+          。
         </p>
       )}
       {f.strategy.source === "solver" && f.strategy.exploitability !== undefined && (

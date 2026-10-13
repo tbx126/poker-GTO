@@ -14,6 +14,8 @@ export interface PostflopSolver {
   prepare(s: GameState): void;
   /** 等这条街求解完，返回 seat 在当前节点的策略。 */
   solve(s: GameState, seat: number): Promise<Strategy>;
+  /** 任何人数的翻后近似：按对手的实际动作收窄范围后估算，同步算完；没有时用 approxStrategy。 */
+  approx?(s: GameState, seat: number): Promise<Strategy>;
   /** 一手牌结束时释放后台求解。 */
   cancel(handId: string): void;
 }
@@ -38,6 +40,13 @@ export async function strategyFor(s: GameState, seat: number, table: IndexedTabl
     } catch (e) {
       // 求解失败（范围表缺失、局面不在树里等）时退回近似，不打断对局。
       console.warn("求解器不可用，改用近似策略：", e);
+    }
+    if (solver.approx) {
+      try {
+        return await solver.approx(s, seat);
+      } catch (e) {
+        console.warn("后端近似不可用，改用胜率估算：", e);
+      }
     }
   }
   return approxStrategy(s, seat);

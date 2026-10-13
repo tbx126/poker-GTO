@@ -1,7 +1,7 @@
 // Windows 发布版不弹出控制台窗口。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use solver_api::{Engine, EngineOptions, HandState, SolverStrategy};
+use solver_api::{ApproxStrategy, Engine, EngineOptions, HandState, LegalMove, SolverStrategy};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// 当前局面能否交给求解器（翻牌开始就是两人底池，而且找得到对应人数的翻前范围表）。
@@ -37,6 +37,19 @@ async fn solver_strategy(
 
 /// 一手牌结束或换桌时取消后台求解，释放内存。
 #[tauri::command]
+async fn solver_approx(
+    engine: State<'_, Engine>,
+    state: HandState,
+    seat: usize,
+    legal: Vec<LegalMove>,
+) -> Result<ApproxStrategy, String> {
+    let engine = engine.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || engine.approx(&state, seat, &legal))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 fn solver_cancel(engine: State<'_, Engine>, hand_id: String) {
     engine.cancel(&hand_id);
 }
@@ -53,6 +66,7 @@ fn main() {
             solver_supports,
             solver_prepare,
             solver_strategy,
+            solver_approx,
             solver_cancel
         ])
         .run(tauri::generate_context!())

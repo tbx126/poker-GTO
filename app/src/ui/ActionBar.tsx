@@ -34,7 +34,12 @@ export function ActionBar({ moves, committed, hint, onMove }: Props) {
             <kbd>{i + 1}</kbd>
             <b>{m.kind === "bet" ? shortLabel(m) : m.kind === "raise" ? "加注" : m.label}</b>
             <small>{detail(m, extra)}</small>
-            {freq !== undefined && <span className="hint-fill" style={{ width: `${freq * 100}%` }} />}
+            {freq !== undefined && (
+              <>
+                <em className="freq">{Math.round(freq * 100)}%</em>
+                <span className="hint-fill" style={{ width: `${freq * 100}%` }} />
+              </>
+            )}
           </button>
         );
       })}

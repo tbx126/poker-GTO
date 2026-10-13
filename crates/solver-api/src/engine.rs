@@ -1,7 +1,9 @@
 use crate::line::{
     heads_up_seats, hole_cards, match_action, parse_cards, preflop_actions, street_moves,
 };
-use crate::types::{ActionAdvice, HandState, MoveKind, Progress, SolverStrategy};
+use crate::types::{
+    ActionAdvice, ApproxStrategy, HandState, LegalMove, MoveKind, Progress, SolverStrategy,
+};
 use holdem::Card;
 use postflop::{
     build_game, next_street_spot, range_from_classes, solve, to_chips, Outcome, Sizes,
@@ -172,6 +174,22 @@ impl Engine {
             actions,
             exploitability,
             converged,
+        })
+    }
+
+    /// 规则近似：任何人数的翻后局面都能用（多人底池用它），同步计算，不到一秒。
+    /// `legal` 是前端算出的合法动作，只评估这些。
+    pub fn approx(
+        &self,
+        state: &HandState,
+        seat: usize,
+        legal: &[LegalMove],
+    ) -> Result<ApproxStrategy, String> {
+        let table = self.table(state.players)?;
+        let result = crate::approx::approx(&table.tree, &table.strategy, state, seat, legal)?;
+        Ok(ApproxStrategy {
+            actions: result.actions,
+            equity: result.equity,
         })
     }
 

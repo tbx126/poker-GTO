@@ -54,13 +54,16 @@
 #![cfg_attr(feature = "custom-alloc", feature(allocator_api))]
 // 上游代码（b-inary/postflop-solver，2023-10 停更）沿用原有写法，这些新版 clippy 风格提示不改代码。
 #![allow(
+    unknown_lints,
     clippy::doc_overindented_list_items,
     clippy::large_const_arrays,
     clippy::manual_contains,
+    clippy::manual_isolate_lowest_one,
     clippy::missing_const_for_thread_local,
     clippy::needless_maybe_sized,
     clippy::needless_range_loop,
-    clippy::to_string_trait_impl
+    clippy::to_string_trait_impl,
+    clippy::chunks_exact_to_as_chunks
 )]
 
 #[cfg(feature = "custom-alloc")]

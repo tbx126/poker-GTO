@@ -37,6 +37,8 @@ impl AtomicF64 {
         self.0.store(v.to_bits(), Relaxed);
     }
 
+    // fetch_update 在 Rust 1.99 改名为 try_update；保留旧名以兼容较早的编译器。
+    #[allow(deprecated)]
     pub(crate) fn add(&self, v: f64) {
         let _ = self.0.fetch_update(Relaxed, Relaxed, |u| {
             Some((f64::from_bits(u) + v).to_bits())

@@ -1,2 +1,3 @@
 /target
-/data/preflop/
+# 范围表：.bin 提交进仓库（桌面应用打包要用），.json 已复制到 app/public/ranges/
+/data/preflop/*.json

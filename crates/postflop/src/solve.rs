@@ -1,8 +1,8 @@
 use crate::{to_chips, Sizes};
 use holdem::Card;
 use postflop_solver::{
-    compute_exploitability, finalize, solve_step, ActionTree, BoardState, CardConfig, PostFlopGame,
-    Range, TreeConfig, NOT_DEALT,
+    compute_exploitability, finalize, solve_step, Action as TreeAction, ActionTree, BoardState,
+    CardConfig, PostFlopGame, Range, TreeConfig, NOT_DEALT,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -17,6 +17,8 @@ pub struct Spot {
     pub pot: f32,
     /// 双方剩余的有效筹码，单位 bb。
     pub stack: f32,
+    /// OOP 能否在这条街领先下注。上一条街最后的进攻者是 IP 时不能（不设领先下注）。
+    pub oop_can_lead: bool,
 }
 
 /// 按局面和下注尺寸建好博弈树并分配内存。
@@ -41,14 +43,29 @@ pub fn build_game_unallocated(spot: &Spot, sizes: &Sizes) -> Result<PostFlopGame
         turn,
         river,
     };
+    let tree_config = tree_config(spot.pot, spot.stack, sizes, initial_state)?;
+    let mut tree = ActionTree::new(tree_config)?;
+    if !spot.oop_can_lead {
+        forbid_lead(&mut tree)?;
+    }
+    PostFlopGame::with_config(card_config, tree)
+}
+
+/// 博弈树的配置：底池和有效筹码（bb）、从哪条街开始、各街下注尺寸。
+pub fn tree_config(
+    pot: f32,
+    stack: f32,
+    sizes: &Sizes,
+    initial_state: BoardState,
+) -> Result<TreeConfig, String> {
     let flop = sizes.flop.options()?;
     let turn = sizes.turn.options()?;
     let river = sizes.river.options()?;
     let donk = sizes.donk_options()?;
-    let tree_config = TreeConfig {
+    Ok(TreeConfig {
         initial_state,
-        starting_pot: to_chips(spot.pot),
-        effective_stack: to_chips(spot.stack),
+        starting_pot: to_chips(pot),
+        effective_stack: to_chips(stack),
         rake_rate: 0.0,
         rake_cap: 0.0,
         flop_bet_sizes: [flop.clone(), flop],
@@ -59,9 +76,21 @@ pub fn build_game_unallocated(spot: &Spot, sizes: &Sizes) -> Result<PostFlopGame
         add_allin_threshold: sizes.add_allin_threshold,
         force_allin_threshold: sizes.force_allin_threshold,
         merging_threshold: sizes.merging_threshold,
-    };
-    let tree = ActionTree::new(tree_config)?;
-    PostFlopGame::with_config(card_config, tree)
+    })
+}
+
+/// 去掉根节点上 OOP 的下注和全下，只留过牌。
+pub fn forbid_lead(tree: &mut ActionTree) -> Result<(), String> {
+    let leads: Vec<TreeAction> = tree
+        .available_actions()
+        .iter()
+        .copied()
+        .filter(|a| matches!(a, TreeAction::Bet(_) | TreeAction::AllIn(_)))
+        .collect();
+    for a in leads {
+        tree.remove_line(&[a])?;
+    }
+    Ok(())
 }
 
 pub struct SolveOptions {
@@ -156,13 +185,28 @@ pub fn solve(
 
 /// 从已解完的树里走到下一条街的开头（发完新牌、还没人行动）后，取出重新求解要用的局面：
 /// 双方范围是走到这里的概率，底池和筹码按这条线上已下的注计算。
-pub fn next_street_spot(game: &PostFlopGame) -> Result<Spot, String> {
+/// 会从根节点重放一遍历史，以便找出上一条街最后的进攻者。
+pub fn next_street_spot(game: &mut PostFlopGame) -> Result<Spot, String> {
     if game.is_terminal_node() || game.is_chance_node() {
         return Err("当前不是决策节点".into());
     }
     let [oop, ip] = game.total_bet_amount();
     if oop != ip {
         return Err("还有未跟完的下注，不在一条街的开头".into());
+    }
+    let history = game.history().to_vec();
+    game.back_to_root();
+    let (mut street_aggressor, mut previous_aggressor) = (None, None);
+    for &i in &history {
+        if game.is_chance_node() {
+            previous_aggressor = street_aggressor.take();
+        } else if matches!(
+            game.available_actions()[i],
+            TreeAction::Bet(_) | TreeAction::Raise(_) | TreeAction::AllIn(_)
+        ) {
+            street_aggressor = Some(game.current_player());
+        }
+        game.play(i);
     }
     let config = game.tree_config();
     let pot = config.starting_pot + oop + ip;
@@ -174,5 +218,6 @@ pub fn next_street_spot(game: &PostFlopGame) -> Result<Spot, String> {
         ranges: [range(0)?, range(1)?],
         pot: crate::to_bb(pot as f32),
         stack: crate::to_bb(stack as f32),
+        oop_can_lead: previous_aggressor != Some(1),
     })
 }

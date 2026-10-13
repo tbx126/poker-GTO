@@ -102,8 +102,19 @@ fn heads_up_four_bet_pot_across_streets() {
             mv(1, 1, MoveKind::Call, bet.to),
         ],
     );
+    // 翻牌最后的进攻者是小盲（有位置），大盲在转牌不能领先下注，只能过牌。
     let bb_turn = engine.strategy(&turn, 1).unwrap();
     check_strategy(&bb_turn.actions);
+    assert!(bb_turn.actions.iter().all(|a| a.kind == MoveKind::Check));
+
+    // 大盲过牌后，小盲在转牌有下注选项。
+    let mut after_turn_check = turn.clone();
+    after_turn_check
+        .postflop
+        .push(mv(2, 1, MoveKind::Check, 0.0));
+    let sb_turn = engine.strategy(&after_turn_check, 0).unwrap();
+    check_strategy(&sb_turn.actions);
+    assert!(sb_turn.actions.iter().any(|a| a.kind != MoveKind::Check));
     assert!(bb_turn.exploitability < 0.01);
 
     engine.cancel("test-1");

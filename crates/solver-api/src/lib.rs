@@ -7,7 +7,7 @@
 //! 只支持从翻牌开始就是两人的底池，多人底池由前端用规则近似。
 
 mod engine;
-mod line;
+pub mod line;
 mod types;
 
 pub use engine::{Engine, EngineOptions};

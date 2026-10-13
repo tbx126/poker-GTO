@@ -32,6 +32,7 @@ fn hu_srp(cards: &str) -> Spot {
         ],
         pot: result.contrib.iter().sum(),
         stack: tree.config.stack - result.contrib[1],
+        oop_can_lead: true,
     }
 }
 
@@ -79,7 +80,8 @@ fn turn_converges_and_river_resolves() {
     }
     assert!(game.is_chance_node());
     game.play(parse_card("2c").unwrap() as usize);
-    let river = next_street_spot(&game).unwrap();
+    let river = next_street_spot(&mut game).unwrap();
+    assert!(river.oop_can_lead);
     assert_eq!(river.board, board("Qh8c3dJs2c"));
     assert_eq!(river.pot, spot.pot);
     assert_eq!(river.stack, spot.stack);

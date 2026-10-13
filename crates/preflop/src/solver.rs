@@ -1,6 +1,8 @@
 use crate::model::{mat_vec, Model};
 use crate::tree::{Node, Tree};
 use holdem::{HandClass, NUM_CLASSES, TOTAL_COMBOS};
+use rayon::prelude::*;
+use std::sync::Mutex;
 
 const N: usize = NUM_CLASSES;
 
@@ -11,23 +13,44 @@ pub fn prior() -> Vec<f64> {
         .collect()
 }
 
-/// 翻前 CFR+ 的 CPU 参考实现：按起手牌向量化遍历公开下注树。
-/// 它的作用是给 GPU 版本当对照，速度不是重点。
+/// 一个决策节点的累计遗憾和累计策略，布局都是 169 行 × 动作数。
+#[derive(Default)]
+struct NodeData {
+    regrets: Vec<f64>,
+    strategy_sum: Vec<f64>,
+}
+
+/// 翻前 CFR+：按起手牌向量化遍历公开下注树，子树之间用 rayon 并行。
+///
+/// 每次遍历只更新一名玩家的节点，而每个节点在一次遍历里只访问一次，
+/// 所以每个节点的锁不会有竞争，只是为了让并行的子树安全地各写各的节点。
 pub struct Solver<'a> {
     tree: &'a Tree,
     model: &'a Model,
-    regrets: Vec<f64>,
-    strategy_sum: Vec<f64>,
+    data: Vec<Mutex<NodeData>>,
     iteration: usize,
 }
 
 impl<'a> Solver<'a> {
     pub fn new(tree: &'a Tree, model: &'a Model) -> Self {
+        let data = tree
+            .nodes
+            .iter()
+            .map(|node| {
+                let len = match node {
+                    Node::Decision { actions, .. } => N * actions.len(),
+                    Node::Terminal { .. } => 0,
+                };
+                Mutex::new(NodeData {
+                    regrets: vec![0.0; len],
+                    strategy_sum: vec![0.0; len],
+                })
+            })
+            .collect();
         Solver {
             tree,
             model,
-            regrets: vec![0.0; tree.strategy_len],
-            strategy_sum: vec![0.0; tree.strategy_len],
+            data,
             iteration: 0,
         }
     }
@@ -41,8 +64,7 @@ impl<'a> Solver<'a> {
         for _ in 0..iterations {
             self.iteration += 1;
             for p in 0..players {
-                let mut reach = vec![prior(); players];
-                self.train(self.tree.root(), p, &mut reach);
+                self.train(self.tree.root(), p, vec![prior(); players]);
             }
         }
     }
@@ -50,59 +72,66 @@ impl<'a> Solver<'a> {
     /// 平均策略，布局与树的策略数组相同：每个决策节点 169 行、每行是各动作的概率。
     pub fn average_strategy(&self) -> Vec<f64> {
         let mut out = vec![0.0; self.tree.strategy_len];
-        for node in &self.tree.nodes {
+        for (node, data) in self.tree.nodes.iter().zip(&self.data) {
             if let Node::Decision {
                 actions, offset, ..
             } = node
             {
                 let a = actions.len();
+                let data = data.lock().unwrap();
                 for h in 0..N {
-                    let i = offset + h * a;
-                    regret_match(&self.strategy_sum[i..i + a], &mut out[i..i + a]);
+                    let (i, j) = (offset + h * a, h * a);
+                    regret_match(&data.strategy_sum[j..j + a], &mut out[i..i + a]);
                 }
             }
         }
         out
     }
 
-    fn train(&mut self, node: usize, p: usize, reach: &mut [Vec<f64>]) -> Vec<f64> {
+    fn train(&self, node: usize, p: usize, reach: Vec<Vec<f64>>) -> Vec<f64> {
         let tree = self.tree;
         match &tree.nodes[node] {
             Node::Terminal {
                 contrib,
                 alive,
                 allin,
-            } => terminal_values(tree, self.model, contrib, alive, *allin, p, reach),
+            } => terminal_values(tree, self.model, contrib, alive, *allin, p, &reach),
             Node::Decision {
                 player,
                 actions,
                 children,
-                offset,
+                ..
             } => {
                 let a = actions.len();
                 let mut sigma = vec![0.0; N * a];
-                for h in 0..N {
-                    let i = offset + h * a;
-                    regret_match(&self.regrets[i..i + a], &mut sigma[h * a..(h + 1) * a]);
+                {
+                    let data = self.data[node].lock().unwrap();
+                    for h in 0..N {
+                        let i = h * a;
+                        regret_match(&data.regrets[i..i + a], &mut sigma[i..i + a]);
+                    }
                 }
-                if *player != p {
-                    return opponent_node(reach, *player, children, &sigma, |child, reach| {
-                        self.train(child, p, reach)
-                    });
-                }
-                let values = own_node(reach, p, children, &sigma, |child, reach| {
+                let values = branch(&reach, *player, children, &sigma, |child, reach| {
                     self.train(child, p, reach)
                 });
+                if *player != p {
+                    return sum(values);
+                }
                 let weight = self.iteration as f64;
                 let mut out = vec![0.0; N];
+                let mut data = self.data[node].lock().unwrap();
+                let NodeData {
+                    regrets,
+                    strategy_sum,
+                } = &mut *data;
                 for h in 0..N {
-                    let s = &sigma[h * a..(h + 1) * a];
+                    let i = h * a;
+                    let s = &sigma[i..i + a];
                     let v: f64 = (0..a).map(|k| s[k] * values[k][h]).sum();
                     out[h] = v;
-                    let i = offset + h * a;
                     for k in 0..a {
-                        self.regrets[i + k] = (self.regrets[i + k] + values[k][h] - v).max(0.0);
-                        self.strategy_sum[i + k] += weight * reach[p][h] * s[k];
+                        regrets[i + k] = (regrets[i + k] + values[k][h] - v).max(0.0);
+                        strategy_sum[i + k] += weight * reach[p][h] * s[k];
                     }
                 }
                 out
@@ -111,53 +140,35 @@ impl<'a> Solver<'a> {
     }
 }
 
-/// 对手节点：对手按各自策略分流到每个动作，`p` 的反事实收益是各分支之和。
-fn opponent_node(
-    reach: &mut [Vec<f64>],
+/// 决策节点的每个动作分支：行动者的到达概率乘上该动作的概率，各分支并行求值。
+fn branch(
+    reach: &[Vec<f64>],
     player: usize,
     children: &[usize],
     sigma: &[f64],
-    mut recurse: impl FnMut(usize, &mut [Vec<f64>]) -> Vec<f64>,
-) -> Vec<f64> {
-    let a = children.len();
-    let saved = reach[player].clone();
-    let mut out = vec![0.0; N];
-    for (k, &child) in children.iter().enumerate() {
-        for h in 0..N {
-            reach[player][h] = saved[h] * sigma[h * a + k];
-        }
-        for (o, v) in out.iter_mut().zip(recurse(child, reach)) {
-            *o += v;
-        }
-    }
-    reach[player] = saved;
-    out
-}
-
-/// `p` 自己的节点：分别求每个动作的反事实收益。
-/// 反事实收益本身不含 `p` 自己的到达概率，但多人底池的份额归一化要用到 `p` 的实际范围，
-/// 所以往下传的 `reach[p]` 仍按 `p` 的策略分流。
-fn own_node(
-    reach: &mut [Vec<f64>],
-    player: usize,
-    children: &[usize],
-    sigma: &[f64],
-    mut recurse: impl FnMut(usize, &mut [Vec<f64>]) -> Vec<f64>,
+    recurse: impl Fn(usize, Vec<Vec<f64>>) -> Vec<f64> + Sync,
 ) -> Vec<Vec<f64>> {
     let a = children.len();
-    let saved = reach[player].clone();
-    let values = children
-        .iter()
+    children
+        .par_iter()
         .enumerate()
         .map(|(k, &child)| {
-            for h in 0..N {
-                reach[player][h] = saved[h] * sigma[h * a + k];
+            let mut reach = reach.to_vec();
+            for (h, r) in reach[player].iter_mut().enumerate() {
+                *r *= sigma[h * a + k];
             }
             recurse(child, reach)
         })
-        .collect();
-    reach[player] = saved;
-    values
+        .collect()
+}
+
+fn sum(values: Vec<Vec<f64>>) -> Vec<f64> {
+    values.into_iter().fold(vec![0.0; N], |mut acc, v| {
+        for (a, x) in acc.iter_mut().zip(v) {
+            *a += x;
+        }
+        acc
+    })
 }
 
 /// 终局节点上 `p` 每种起手牌的反事实收益（已乘上其他所有玩家的到达概率）。
@@ -301,8 +312,8 @@ pub fn evaluate(tree: &Tree, model: &Model, strategy: &[f64]) -> Report {
     let players = tree.config.players;
     let prior = prior();
     let value = |p: usize, best: bool| {
-        let mut reach = vec![prior.clone(); players];
-        let cfv = eval_node(tree, model, strategy, tree.root(), p, best, &mut reach);
+        let reach = vec![prior.clone(); players];
+        let cfv = eval_node(tree, model, strategy, tree.root(), p, best, reach);
         cfv.iter().zip(&prior).map(|(v, w)| v * w).sum()
     };
     Report {
@@ -318,14 +329,14 @@ fn eval_node(
     node: usize,
     p: usize,
     best: bool,
-    reach: &mut [Vec<f64>],
+    reach: Vec<Vec<f64>>,
 ) -> Vec<f64> {
     match &tree.nodes[node] {
         Node::Terminal {
             contrib,
             alive,
             allin,
-        } => terminal_values(tree, model, contrib, alive, *allin, p, reach),
+        } => terminal_values(tree, model, contrib, alive, *allin, p, &reach),
         Node::Decision {
             player,
             actions,
@@ -334,15 +345,12 @@ fn eval_node(
         } => {
             let a = actions.len();
             let sigma = &strategy[*offset..offset + N * a];
-            if *player != p {
-                return opponent_node(reach, *player, children, sigma, |child, reach| {
-                    eval_node(tree, model, strategy, child, p, best, reach)
-                });
-            }
-            // 最佳应对模式下 p 的范围仍按 `strategy` 计算，只在多人底池的归一化里用到。
-            let values = own_node(reach, p, children, sigma, |child, reach| {
+            let values = branch(&reach, *player, children, sigma, |child, reach| {
                 eval_node(tree, model, strategy, child, p, best, reach)
             });
+            if *player != p {
+                return sum(values);
+            }
             (0..N)
                 .map(|h| {
                     let actions = 0..a;

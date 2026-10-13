@@ -12,5 +12,6 @@ fn main() {
     let start = Instant::now();
     solver.run(iterations);
     let per = start.elapsed().as_secs_f64() / iterations as f64;
-    println!("{players} 人：每轮 {per:.2} 秒（单线程）");
+    let threads = rayon::current_num_threads();
+    println!("{players} 人：每轮 {per:.2} 秒（{threads} 线程）");
 }

@@ -7,3 +7,4 @@ description = "2 到 6 人翻前求解器：简化下注树、翻后估值模型
 
 [dependencies]
 holdem = { path = "../holdem" }
+rayon = "1.10"
